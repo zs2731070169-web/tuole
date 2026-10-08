@@ -1,0 +1,269 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+/* 色值套数：纯深色或纯浅色只写 :root 一套，删除多余的 .dark 与下方 @custom-variant dark；非纯色默认写 :root + .dark 两套（数值须不同） */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: var(--font-sans);
+  /* 状态机语义色：today/upcoming/overdue/done 统一取用 */
+  --color-status-today: var(--status-today);
+  --color-status-upcoming: var(--status-upcoming);
+  --color-status-overdue: var(--status-overdue);
+  --color-status-done: var(--status-done);
+  --color-priority-high: var(--priority-high);
+  --color-priority-medium: var(--priority-medium);
+  --color-priority-low: var(--priority-low);
+}
+
+:root {
+  --radius: 0.625rem;
+  --font-sans: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.129 0.042 264.695);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.129 0.042 264.695);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.208 0.042 265.755);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.968 0.007 247.896);
+  --secondary-foreground: oklch(0.208 0.042 265.755);
+  --muted: oklch(0.968 0.007 247.896);
+  --muted-foreground: oklch(0.521 0.011 257.2);
+  --accent: oklch(0.968 0.007 247.896);
+  --accent-foreground: oklch(0.208 0.042 265.755);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.929 0.013 255.508);
+  --input: oklch(0.929 0.013 255.508);
+  --ring: oklch(0.704 0.04 256.788);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.984 0.003 247.858);
+  --sidebar-foreground: oklch(0.129 0.042 264.695);
+  --sidebar-primary: oklch(0.208 0.042 265.755);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.968 0.007 247.896);
+  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
+  --sidebar-border: oklch(0.929 0.013 255.508);
+  --sidebar-ring: oklch(0.704 0.04 256.788);
+  /* 状态机语义色（浅色） */
+  --status-today: oklch(0.62 0.19 258);
+  --status-upcoming: oklch(0.72 0.05 258);
+  --status-overdue: oklch(0.62 0.21 25);
+  --status-done: oklch(0.65 0.15 155);
+  --priority-high: oklch(0.62 0.21 25);
+  --priority-medium: oklch(0.72 0.15 85);
+  --priority-low: oklch(0.7 0.05 200);
+}
+
+.dark {
+  --background: oklch(0.205 0 0);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.804 0.008 256.9);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.279 0.041 260.031);
+  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.551 0.027 264.364);
+  /* 状态机语义色（深色） */
+  --status-today: oklch(0.72 0.17 258);
+  --status-upcoming: oklch(0.68 0.04 258);
+  --status-overdue: oklch(0.72 0.19 25);
+  --status-done: oklch(0.72 0.14 155);
+  --priority-high: oklch(0.72 0.19 25);
+  --priority-medium: oklch(0.78 0.14 85);
+  --priority-low: oklch(0.68 0.05 200);
+}
+
+@layer base {
+  /* 页面保留滚动能力，但隐藏根页面滚动条：日历月份高度在 5/6 行之间变化时，
+     不再出现桌面端滚动槽，也不会挤压整张日历的宽度。任务栏内部滚动区域不受影响。 */
+  html {
+    /* 即使当前内容不够滚动，也始终保留同一块布局槽位；滚动条本体由下方规则隐藏。 */
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  body {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  /* Tailwind v4 preflight 不给按钮手型（默认箭头），全局恢复「可点 = 手指」的通用预期 */
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+  }
+}
+
+/* 任务项区域一律手指光标（浏览器版产品红线）：鼠标移入任务项任何位置——卡片、勾选框、
+   元信息、hover 工具条、子任务面板——一律 pointer，禁止箭头/I-beam。
+   实现要点：!important + 通配后代 + 伪元素，压过任何子组件自带的 cursor 声明
+  （shadcn 生成件的 cursor-default 等），并与 Tailwind 工具类的排序/特异性完全解耦——
+   此前用 [&_*]:cursor-pointer 工具类实现，同特异性下受样式表排序影响，不可靠。
+   桌面端（Electron）例外：下方 html.desktop-cursors 规则整体压回系统箭头。
+   唯一例外：HTML5 拖拽进行中的系统拖拽光标不受 CSS 控制。 */
+.task-item,
+.task-item *,
+.task-item *::before,
+.task-item *::after {
+  cursor: pointer !important;
+}
+
+/* 桌面端（Electron）光标策略（2026-10 用户决策）：去掉全部手指（pointer）光标，一律系统箭头。
+   仅桌面打包版生效——main.tsx 检测 isDesktopApp 后给 <html> 挂 desktop-cursors，
+   浏览器版保留「可点 = 手指」的通用预期。特异性刻意高于 .task-item 规则
+  （html.desktop-cursors .task-item *），且置于其后，双保险压住上面的 pointer !important；
+   同时压过全局 button/[role=button] 手型与各处 cursor-pointer 工具类（非分层 !important 最强）。
+   文本输入豁免：input/textarea/contenteditable 保留原生 I-beam——
+   编辑文本时箭头才是残疾体验（macOS 原生文本框同为 I-beam，I-beam 不是手指样式）。 */
+html.desktop-cursors,
+html.desktop-cursors *,
+html.desktop-cursors *::before,
+html.desktop-cursors *::after,
+html.desktop-cursors .task-item,
+html.desktop-cursors .task-item * {
+  cursor: default !important;
+}
+
+html.desktop-cursors :is(input, textarea, [contenteditable]),
+html.desktop-cursors :is(input, textarea, [contenteditable]) * {
+  cursor: text !important;
+}
+
+/* 日历轮播是一个固定几何的独立视口：月份切换、任务展开和格内滚动都只能
+   发生在这块区域内，不能把页面其它工具栏重新排版。 */
+.calendar-carousel {
+  contain: layout paint;
+}
+
+/* 展开某一天的全部任务时，只滚动该格的任务列表；滚动条完全隐藏，
+   不再给日期格或整页增加一条会挤压横向空间的原生滚动槽。 */
+.calendar-cell-scroll {
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.calendar-cell-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Electron macOS 隐藏原生标题栏后，由网页 TopBar 承接窗口拖动。
+   左侧为红黄绿窗口按钮预留空间；所有真实控件恢复 no-drag，避免点击被窗口拖动吞掉。 */
+.desktop-titlebar {
+  -webkit-app-region: drag;
+}
+
+.desktop-titlebar-inner {
+  padding-left: 6rem !important;
+}
+
+.desktop-titlebar button,
+.desktop-titlebar [role="button"],
+.desktop-titlebar nav {
+  -webkit-app-region: no-drag;
+}
+
+/* Electron 标题栏拖动区会吞掉其条带内悬浮层的点击（拖动区命中优先于普通元素，
+   即使悬浮层 z-index 更高、且不是拖动区的 DOM 后代）——设置/编辑抽屉的右上角
+   关闭按钮落在顶部条带内，曾表现为「点击无反应」（2026-10 实测修复）。
+   全屏悬浮容器（fixed inset-0 根）、Radix 弹层传送门、对话框一律 no-drag。
+   浏览器版忽略该属性，无副作用 */
+.fixed.inset-0,
+[data-radix-popper-content-wrapper],
+[role="dialog"],
+[role="alertdialog"] {
+  -webkit-app-region: no-drag;
+}

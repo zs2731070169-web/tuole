@@ -1,0 +1,25 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 妥了 · ToDone 应用图标：日历周点排（绿色实心 = 已安排的那天，其余半透明白）+ 居中放大的白色对勾——
+       写下 = 排到某天（蓝底今天的语义色），划掉 = 妥了（status-done 绿）。
+       色板源自 styles.css 语义 token（oklch 换算 sRGB）：渐变 #418FFF→#0064DC（status-today 系）、
+       绿点 #24A965（status-done）。圆角矩形底板四角留透明，多尺寸 PNG 由本母版栅格化 -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#418FFF"/>
+      <stop offset="1" stop-color="#0064DC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角方形底板（约 81% 版面，四角透明） -->
+  <rect x="96" y="96" width="832" height="832" rx="192" fill="url(#plate)"/>
+
+  <!-- 日历周点排：左一枚绿色实心 = 已安排的那天，其余两枚半透明白 -->
+  <circle cx="392" cy="268" r="34" fill="#24A965"/>
+  <circle cx="512" cy="268" r="34" fill="#FFFFFF" opacity="0.55"/>
+  <circle cx="632" cy="268" r="34" fill="#FFFFFF" opacity="0.55"/>
+
+  <!-- 白色对勾：妥了（居中放大，右上收笔与底板右缘留足呼吸位） -->
+  <path d="M 282 536 L 460 714 L 744 350"
+        fill="none" stroke="#FFFFFF" stroke-width="112"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

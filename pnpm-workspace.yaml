@@ -1,0 +1,18 @@
+# esbuild 的 postinstall 仅负责安装平台二进制，属于 vite 工具链常规构建脚本，放行；
+# electron 的 postinstall 负责下载对应平台的 Electron 运行时二进制，同属常规构建脚本
+allowBuilds:
+  esbuild: true
+  electron: true
+  # electron-builder 的 Windows 专属依赖，macOS 打包用不到其构建脚本
+  electron-winstaller: false
+
+# pnpm 11 默认 minimumReleaseAge=1440（拒绝发布不足 24 小时的包）
+# electron-to-chromium 是 browserslist 的纯数据传递依赖、几乎每天发版，单独豁免此版本
+minimumReleaseAgeExclude:
+  - electron-to-chromium@1.5.448
+
+# pnpm 11 起 overrides 只认 pnpm-workspace.yaml（package.json 的 pnpm 字段已废弃）。
+# electron-builder(app-builder-lib) 的传递依赖锁到新版：旧 @electron/get 3.x 缺
+# ElectronDownloadCacheMode 导出，打包 macOS 时必崩（resolveCacheMode TypeError）
+overrides:
+  "@electron/get": ^5.1.0
