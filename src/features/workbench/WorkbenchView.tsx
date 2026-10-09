@@ -65,6 +65,8 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
   const lang = useSettingsStore((s) => s.settings.language);
   const zh = lang === "zh-CN";
   const scheduleTo = useTaskStore((s) => s.scheduleTo);
+  const startTask = useTaskStore((s) => s.startTask);
+  const markUnscheduled = useTaskStore((s) => s.markUnscheduled);
   const complete = useTaskStore((s) => s.complete);
   const openEditor = useUiStore((s) => s.openEditor);
   const select = useUiStore((s) => s.select);
@@ -213,7 +215,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
       if (draggingTaskId && columnTaskIds(col)?.has(draggingTaskId)) return;
       const id = e.dataTransfer.getData("text/task-id");
       if (!id) return;
-      if (col === "today") scheduleTo(id, workbenchDay); // 拖入当日栏 = 排到选中日（默认今天）
+      if (col === "today") startTask(id); // 拖入进行中只改生命周期，任务日期保持不变
       else if (col === "overdue") {
         // 门禁（防御性双保险，与 dragover 同口径）：仅未安排/今天/未来可拖入——排到昨天即成欠账
         const draggedTask = useTaskStore.getState().tasks.find((t) => t.id === id);
@@ -228,7 +230,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
         const draggedTask = useTaskStore.getState().tasks.find((t) => t.id === id);
         const status = draggedTask ? computeAutoStatus(draggedTask, { now: new Date() }) : null;
         if (status && status !== "overdue" && canFinish(status)) complete([id], "dragged");
-      } else scheduleTo(id, null, workbenchDay); // 拖回未安排 = 取消排期，停靠在当前选中日
+      } else markUnscheduled(id); // 拖回未安排只改生命周期，日期保持不变
     },
   });
 

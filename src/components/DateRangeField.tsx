@@ -22,16 +22,27 @@ interface Props {
   lang: Lang;
   /** 无值时的占位文案；默认「未安排日期」（任务编辑语境），筛选语境可传「不限日期」 */
   placeholder?: string;
+  /** 无起始日时日历弹层的默认锚点日（'YYYY-MM-DD'）：编辑抽屉传任务停靠日/工作台选中日，
+   *  让日历直接翻到任务所属月份、且该日承载「今天」样式高亮（DayPicker today 属性覆写——
+   *  月份锚定在同月时不可见，天级高亮才是用户感知的「默认所选」）；缺失或非法回落今天。
+   *  有起始日时不起作用（仍锚起始月、真实今天恢复高亮） */
+  anchorDay?: string | null;
   /** 触发器高度档位：md = h-9（编辑抽屉，默认）；sm = h-7（ViewToolbar 行内筛选胶囊内嵌，
    *  与同行搜索框/按钮的 36px 行高对齐——胶囊 p-1 + 28px 触发器 = 36px） */
   size?: "md" | "sm";
+  /** 是否允许清空。筛选器需要清空；任务日期按「始终存在」口径关闭。 */
+  allowClear?: boolean;
 }
 
-export function DateRangeField({ start, end, onChange, lang, placeholder, size = "md" }: Props) {
+export function DateRangeField({ start, end, onChange, lang, placeholder, anchorDay, size = "md", allowClear = true }: Props) {
   const zh = lang === "zh-CN";
   const [open, setOpen] = useState(false);
   // 本地草稿：每次打开弹层都从最新入库值重置，避免连续开合串值
   const [draft, setDraft] = useState<DateRange | undefined>(toRange(start, end));
+  // 无起始日时的默认月份锚点：anchorDay 优先，非法/缺失回落今天（2026-10-09 用户决策：
+  // 编辑抽屉日历默认定位到任务所属日子，而非机械地翻到今天）。
+  // 同日兼作 today 覆写值——「默认所选」的视觉落点是天级高亮，仅锚月份在同月时不可见
+  const anchorMonth = resolveAnchorMonth(anchorDay);
 
   useEffect(() => {
     if (open) setDraft(toRange(start, end));
@@ -76,7 +87,11 @@ export function DateRangeField({ start, end, onChange, lang, placeholder, size =
             selected={draft}
             onSelect={pick}
             numberOfMonths={2}
-            defaultMonth={draft?.from ?? fromDateKey(todayKey())}
+            // 双月恒相邻：边界周（左月尾部 + 右月头部）的 outside 补位格会在两个面板各渲染
+            // 一遍 = 同一日期出现两次（2026-10-10 用户实测），关掉补位；单月实例保留补位
+            showOutsideDays={false}
+            defaultMonth={draft?.from ?? anchorMonth}
+            today={draft?.from ? undefined : anchorMonth}
             weekStartsOn={1}
             className="max-[420px]:hidden"
           />
@@ -86,7 +101,8 @@ export function DateRangeField({ start, end, onChange, lang, placeholder, size =
             selected={draft}
             onSelect={pick}
             numberOfMonths={1}
-            defaultMonth={draft?.from ?? fromDateKey(todayKey())}
+            defaultMonth={draft?.from ?? anchorMonth}
+            today={draft?.from ? undefined : anchorMonth}
             weekStartsOn={1}
             className="min-[421px]:hidden"
           />
@@ -98,16 +114,18 @@ export function DateRangeField({ start, end, onChange, lang, placeholder, size =
             >
               {zh ? "今天起一周" : "Today + 1 week"}
             </Chip>
-            <Chip
-              tone="muted"
-              onClick={() => {
-                setDraft(undefined);
-                commit({ start: null, end: null });
-              }}
-            >
-              <Eraser className="size-3" />
-              {zh ? "清除" : "Clear"}
-            </Chip>
+            {allowClear && (
+              <Chip
+                tone="muted"
+                onClick={() => {
+                  setDraft(undefined);
+                  commit({ start: null, end: null });
+                }}
+              >
+                <Eraser className="size-3" />
+                {zh ? "清除" : "Clear"}
+              </Chip>
+            )}
           </div>
         </PopoverContent>
       </Popover>
@@ -136,6 +154,15 @@ function toRange(start: string | null, end: string | null): DateRange | undefine
   if (!start) return undefined;
   const from = fromDateKey(start);
   return { from, to: end ? fromDateKey(end) : undefined };
+}
+
+/** 锚点日 → 日历默认月份；锚点缺失或非法（解析出 Invalid Date）回落今天 */
+function resolveAnchorMonth(anchorDay: string | null | undefined): Date {
+  if (anchorDay) {
+    const candidate = fromDateKey(anchorDay);
+    if (!Number.isNaN(candidate.getTime())) return candidate;
+  }
+  return fromDateKey(todayKey());
 }
 
 function addWeekEnd(): Date {

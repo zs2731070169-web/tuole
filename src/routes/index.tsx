@@ -14,7 +14,7 @@ import { bucketWorkbenchColumns } from "../shared/workbench";
 import { computeOverviewStats } from "../shared/overviewStats";
 import { toDateKey } from "../lib/date";
 import { computeAutoStatus } from "../shared/statusMachine";
-import { completedDay, scheduledSpanOverlaps } from "../shared/taskDates";
+import { scheduledSpanOverlaps } from "../shared/taskDates";
 import { startScheduler, stopScheduler } from "../services/scheduler";
 import { startAutoBackup, stopAutoBackup } from "../services/backup";
 import { TopBar } from "../components/TopBar";
@@ -28,7 +28,6 @@ import { TaskEditor } from "../features/tasks/TaskEditor";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { SelectionBar } from "../components/SelectionBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { CreationJumpBanner } from "../components/CreationJumpBanner";
 
 export const Route = createFileRoute("/")({ component: App });
 
@@ -126,16 +125,12 @@ function App() {
     return bucketWorkbenchColumns(withoutStatus, workbenchDay).overdue;
   }, [views, filter, workbenchDay]);
   // 状态筛选栏只在日历渲染（2026-10 用户决策：概览已移除筛选栏与工具行、工作台本就无此栏），
-  // 计数口径 = 当前展示月 + 未安排（未安排无日期不进格子，但要在日历显示并统计——2026-10 用户决策；
-  // 并入后只影响「全部/未安排」两项计数，进行中/逾期/已完成按 status 归类不受影响）
+  // 计数口径 = 当前展示月。未安排任务同样有 scheduledDates，直接按所属月计数。
   const countViews = useMemo(() => {
     if (view === "calendar") {
       const monthPrefix = `${toDateKey(calendarAnchor).slice(0, 7)}`;
-      const monthTasks = views.filter((v) => v.status === "done"
-        ? completedDay(v)?.startsWith(monthPrefix)
-        : scheduledSpanOverlaps(v, `${monthPrefix}-01`, `${monthPrefix}-31`));
-      const unscheduledTasks = views.filter((v) => v.status === "unscheduled");
-      return [...monthTasks, ...unscheduledTasks];
+      const monthTasks = views.filter((v) => scheduledSpanOverlaps(v, `${monthPrefix}-01`, `${monthPrefix}-31`));
+      return monthTasks;
     }
     return views;
   }, [views, view, calendarAnchor]);
@@ -219,8 +214,6 @@ function App() {
       {settingsOpen && <SettingsPanel />}
       {/* 选中操作条：多选任务后底部浮出（批量删除等），自选门控、无选中不渲染 */}
       <SelectionBar />
-      {/* 新建落到非当前日的「跳转横幅」（第一方组件，替代已废弃的 sonner toast 方案） */}
-      <CreationJumpBanner />
       {/* 删除确认统一由应用内 AlertDialog 承接：任务行、选中条、快捷键与日历按日期删除共用 */}
       <ConfirmDialog />
     </div>

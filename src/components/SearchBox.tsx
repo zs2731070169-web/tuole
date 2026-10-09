@@ -1,4 +1,4 @@
-// 搜索框：标题/说明模糊搜索，输入后按回车提交
+// 搜索框：标题/备注模糊搜索，输入后按回车提交
 import { forwardRef, useEffect, useState } from "react";
 import { Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";

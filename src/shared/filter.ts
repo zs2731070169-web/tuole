@@ -2,8 +2,7 @@
 // 关键约束：筛选只改变「展示」，绝不改变任何任务状态
 import type { TaskView, FilterState, TaskStatus } from "./types";
 import { isActive } from "./statusMachine";
-import { toDateKey } from "../lib/date";
-import { scheduledSpanOverlaps } from "./taskDates";
+import { firstScheduledDay, scheduledSpanOverlaps } from "./taskDates";
 
 function matchStatus(status: TaskStatus, filter: FilterState["status"]): boolean {
   switch (filter) {
@@ -33,19 +32,8 @@ function matchKeyword(task: TaskView, kw: string): boolean {
 
 function matchDateRange(task: TaskView, from: string | null, to: string | null): boolean {
   if (!from && !to) return true;
-  // 日期范围匹配「执行期」**或**「完成日」，任一命中即展示：
-  // 已结束任务额外按 completedAt 命中——工作台已完成栏按完成日分组，
-  // 若只看安排日会出现「本周完成的任务被本周范围滤掉」的自相矛盾。
-  const inRange = (dayKey: string | null) => {
-    if (!dayKey) return false;
-    if (from && dayKey < from) return false;
-    if (to && dayKey > to) return false;
-    return true;
-  };
-  const finishedStamp = task.completedAt;
-  const finishedDay = finishedStamp ? toDateKey(new Date(finishedStamp)) : null;
-  // 未安排且未结束的任务没有任何日期，在设了范围时不展示
-  return scheduledSpanOverlaps(task, from, to) || inRange(finishedDay);
+  // 日期筛选始终只匹配任务所属日期；完成状态不能把任务换到另一天。
+  return scheduledSpanOverlaps(task, from, to);
 }
 
 export function applyFilters(tasks: TaskView[], f: FilterState): TaskView[] {
@@ -84,10 +72,13 @@ export function sortTasks(tasks: TaskView[], key: SortKey): TaskView[] {
   const arr = [...tasks];
   switch (key) {
     case "scheduledDate":
+      // 执行期模型改造后按「首个执行日」排序（集合可能分散，首日是最稳的排序锚点）
       return arr.sort((a, b) => {
-        if (!a.scheduledDate) return 1;
-        if (!b.scheduledDate) return -1;
-        return a.scheduledDate < b.scheduledDate ? -1 : a.scheduledDate > b.scheduledDate ? 1 : 0;
+        const aFirst = firstScheduledDay(a);
+        const bFirst = firstScheduledDay(b);
+        if (!aFirst) return 1;
+        if (!bFirst) return -1;
+        return aFirst < bFirst ? -1 : aFirst > bFirst ? 1 : 0;
       });
     case "createdAt":
       return arr.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));

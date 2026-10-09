@@ -9,9 +9,9 @@ function tv(over: Partial<TaskView>): TaskView {
     title: "",
     note: "",
     priority: "none",
-    scheduledDate: null,
-    dueDate: null,
-    subtasks: [],
+    scheduledDates: [],todos: [],
+    tags: [],
+    group: null,
     createdAt: "2026-10-01T00:00:00Z",
     completedAt: null,
     completedReason: null,
@@ -22,11 +22,11 @@ function tv(over: Partial<TaskView>): TaskView {
 }
 
 const list: TaskView[] = [
-  tv({ title: "写周报", priority: "high", scheduledDate: "2026-10-07", status: "today" }),
-  tv({ title: "买菜", priority: "low", scheduledDate: "2026-10-05", status: "overdue" }),
-  tv({ title: "体检", priority: "medium", scheduledDate: "2026-10-20", status: "upcoming" }),
-  tv({ title: "读论文", priority: "none", scheduledDate: null, status: "unscheduled" }),
-  tv({ title: "交水电费", priority: "medium", scheduledDate: "2026-10-01", status: "done", completedAt: "2026-10-02T00:00:00Z" }),
+  tv({ title: "写周报", priority: "high", scheduledDates: ["2026-10-07"], status: "today" }),
+  tv({ title: "买菜", priority: "low", scheduledDates: ["2026-10-05"], status: "overdue" }),
+  tv({ title: "体检", priority: "medium", scheduledDates: ["2026-10-20"], status: "upcoming" }),
+  tv({ title: "读论文", priority: "none", scheduledDates: [], status: "unscheduled" }),
+  tv({ title: "交水电费", priority: "medium", scheduledDates: ["2026-10-01"], status: "done", completedAt: "2026-10-02T00:00:00Z" }),
 ];
 
 describe("applyFilters 单维度", () => {
@@ -67,27 +67,26 @@ describe("applyFilters 组合维度", () => {
     expect(r.map((t) => t.title)).toEqual(["写周报"]);
   });
   it("日期范围与任务执行期有交集时展示跨天任务", () => {
-    const span = tv({ title: "跨天任务", scheduledDate: "2026-10-05", dueDate: "2026-10-09" });
+    const span = tv({ title: "跨天任务", scheduledDates: ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"],});
     expect(applyFilters([span], { ...EMPTY_FILTER, dateFrom: "2026-10-07", dateTo: "2026-10-07" })).toEqual([span]);
     expect(applyFilters([span], { ...EMPTY_FILTER, dateFrom: "2026-10-10", dateTo: "2026-10-10" })).toEqual([]);
   });
   it("设了日期范围时未安排任务被排除", () => {
     const f: FilterState = { ...EMPTY_FILTER, dateFrom: "2026-10-01", dateTo: "2026-12-31" };
-    expect(applyFilters(list, f).some((t) => t.scheduledDate === null)).toBe(false);
+    expect(applyFilters(list, f).some((t) => t.scheduledDates.length === 0)).toBe(false);
   });
-  it("日期范围命中完成日：已结束任务按 completedAt 展示（工作台已完成栏场景）", () => {
-    // 交水电费：安排 10-01、完成 10-02——只看安排日会被「10-02 当周」错误滤掉
+  it("完成时间不改任务日期归属", () => {
     const f: FilterState = { ...EMPTY_FILTER, dateFrom: "2026-10-02", dateTo: "2026-10-02" };
-    expect(applyFilters(list, f).map((t) => t.title)).toEqual(["交水电费"]);
+    expect(applyFilters(list, f).map((t) => t.title)).toEqual([]);
   });
   it("日期范围仍命中安排日：日历视角能看到当天已完成的任务", () => {
     const f: FilterState = { ...EMPTY_FILTER, dateFrom: "2026-10-01", dateTo: "2026-10-01" };
     expect(applyFilters(list, f).map((t) => t.title)).toEqual(["交水电费"]);
   });
-  it("无安排日期的已完成任务按完成日命中", () => {
-    const done = tv({ title: "直接完成", scheduledDate: null, status: "done", completedAt: "2026-10-07T08:00:00Z" });
+  it("历史无日期的已完成任务不用完成日代替任务日期", () => {
+    const done = tv({ title: "直接完成", scheduledDates: [], status: "done", completedAt: "2026-10-07T08:00:00Z" });
     const f: FilterState = { ...EMPTY_FILTER, dateFrom: "2026-10-07", dateTo: "2026-10-07" };
-    expect(applyFilters([done], f).length).toBe(1);
+    expect(applyFilters([done], f).length).toBe(0);
   });
 });
 
@@ -105,7 +104,7 @@ describe("hasActiveFilter 与排序", () => {
   });
   it("按安排日期排序，未安排沉底", () => {
     const r = sortTasks(list, "scheduledDate");
-    expect(r[r.length - 1].scheduledDate).toBeNull();
+    expect(r[r.length - 1].scheduledDates).toEqual([]);
   });
 });
 

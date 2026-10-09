@@ -2,7 +2,7 @@
 // 前端展示与结算逻辑共用同一份规则，保证「写自动流转 / 读只筛选」一致
 import type { Task, TaskStatus } from "./types";
 import { todayKey, compareDateKeys } from "../lib/date";
-import { scheduleEnd } from "./taskDates";
+import { firstScheduledDay, lastScheduledDay } from "./taskDates";
 
 export interface StatusRuleContext {
   now: Date; // 当前时间
@@ -10,15 +10,15 @@ export interface StatusRuleContext {
 
 /**
  * 计算任务的「视图状态」。status 永不入库，全部由此派生。
- * 规则（对应需求文档第二章第 2 节）：
+ * 规则（对应需求文档第二章第 2 节；2026-10-09 起执行期 = 日期集合）：
  * - done 优先：已完成不再回到活动区
- * - 无 scheduledDate -> unscheduled
- * - 今天早于起点 -> upcoming
- * - 今天处于起止日期内（含两端）-> today
- * - 今天晚于终点 -> overdue（绝不自动完成）
+ * - 日期集合为空 -> unscheduled
+ * - 今天早于首个执行日 -> upcoming
+ * - 今天在集合内某一天 -> today（含两端语义由集合 includes 承载）
+ * - 今天晚于末个执行日 -> overdue（绝不自动完成）
  */
 export function computeAutoStatus(
-  task: Pick<Task, "scheduledDate" | "dueDate" | "completedAt">,
+  task: Pick<Task, "scheduledDates" | "completedAt" | "startedAt">,
   ctx: StatusRuleContext,
 ): TaskStatus {
   const today = todayKey(ctx.now);
@@ -28,13 +28,24 @@ export function computeAutoStatus(
     return "done";
   }
 
-  // 2) 未安排
-  if (!task.scheduledDate) return "unscheduled";
+  // 2) 未安排由独立生命周期标记决定，不再由「有无日期」代理。
+  // 旧数据没有 startedAt：有日期按旧语义视为已安排，空日期视为未安排。
+  if (!hasTaskStarted(task)) return "unscheduled";
 
-  // 3) 按整个执行期分区。旧任务无截止日 = 单日任务。
-  if (compareDateKeys(task.scheduledDate, today) > 0) return "upcoming";
-  if (compareDateKeys(scheduleEnd(task)!, today) < 0) return "overdue";
+  // 3) 防御坏数据：已开始却没有日期时回落未安排
+  const first = firstScheduledDay(task);
+  if (!first) return "unscheduled";
+
+  // 3) 按集合首末分区（分散日期同样成立：任一天覆盖今天即为 today）
+  if (compareDateKeys(first, today) > 0) return "upcoming";
+  const last = lastScheduledDay(task)!;
+  if (compareDateKeys(last, today) < 0) return "overdue";
   return "today";
+}
+
+/** 是否已经通过「安排」进入活动生命周期。 */
+export function hasTaskStarted(task: Pick<Task, "scheduledDates" | "startedAt">): boolean {
+  return task.startedAt === undefined ? task.scheduledDates.length > 0 : task.startedAt !== null;
 }
 
 // 「进行中」聚合：upcoming + today（2026-10 用户决策：未安排单独统计/筛选，不再并入进行中——

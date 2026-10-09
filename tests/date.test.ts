@@ -1,6 +1,6 @@
 // 顺延目标 + 日期键工具测试（时间轴 bucketFor 已随工作台改版下线）
 import { describe, it, expect } from "vitest";
-import { monthCarouselWindow, monthGrid, rollOverTarget, addDaysKey, compareDateKeys, todayKey, toDateKey, dayKeysInRange } from "../src/lib/date";
+import { monthCarouselWindow, monthGrid, rollOverTarget, addDaysKey, compareDateKeys, todayKey, toDateKey, dayKeysInRange, friendlyDate, workbenchDateLabel } from "../src/lib/date";
 
 const NOW = new Date("2026-10-07T10:00:00"); // 周三
 
@@ -87,5 +87,35 @@ describe("dayKeysInRange 闭区间（日历删除模式 Shift 连选）", () => 
 
   it("非法日期键返回空数组，不抛错", () => {
     expect(dayKeysInRange("not-a-date", "2026-10-08")).toEqual([]);
+  });
+});
+
+describe("workbenchDateLabel 工作台卡片时间锚点（2026-10-09 反馈修正）", () => {
+  it("仅真实今天保留相对词「今天」，其余一律绝对日期", () => {
+    expect(workbenchDateLabel("2026-10-07", "zh-CN", NOW)).toBe("今天");
+    // 明天/昨天在工作台卡片上会与视图框架错位（10号工作台显示「明天」指的却是10号自己）
+    expect(workbenchDateLabel("2026-10-08", "zh-CN", NOW)).toBe("10月8日");
+    expect(workbenchDateLabel("2026-10-06", "zh-CN", NOW)).toBe("10月6日");
+    expect(workbenchDateLabel("2026-10-20", "zh-CN", NOW)).toBe("10月20日");
+  });
+
+  it("英文：Today 之外用 locale 感知的绝对短日期（Oct 8，非中文字面量）", () => {
+    expect(workbenchDateLabel("2026-10-07", "en-US", NOW)).toBe("Today");
+    expect(workbenchDateLabel("2026-10-08", "en-US", NOW)).toBe("Oct 8");
+  });
+
+  it("空值返回空串", () => {
+    expect(workbenchDateLabel(null, "zh-CN", NOW)).toBe("");
+  });
+});
+
+describe("friendlyDate 相对词（改期弹层等真实时间框架专用）", () => {
+  it("今天/明天/昨天相对词保留，绝对分支按语言渲染", () => {
+    expect(friendlyDate("2026-10-07", "zh-CN", NOW)).toBe("今天");
+    expect(friendlyDate("2026-10-08", "zh-CN", NOW)).toBe("明天");
+    expect(friendlyDate("2026-10-06", "zh-CN", NOW)).toBe("昨天");
+    expect(friendlyDate("2026-10-20", "zh-CN", NOW)).toBe("10月20日");
+    // 存量 bug 回归：英文绝对分支曾把「M月d日」的中文字面量直接渲染进英文界面
+    expect(friendlyDate("2026-10-20", "en-US", NOW)).toBe("Oct 20");
   });
 });

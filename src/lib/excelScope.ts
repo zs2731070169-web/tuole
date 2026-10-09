@@ -3,7 +3,7 @@ import { computeAutoStatus } from "../shared/statusMachine";
 import { applyFilters } from "../shared/filter";
 import { bucketWorkbenchColumns } from "../shared/workbench";
 import { monthGrid, toDateKey, todayKey } from "./date";
-import { calendarTaskOnDay, completedDay, scheduledSpanOverlaps } from "../shared/taskDates";
+import { calendarTaskOnDay, scheduledSpanOverlaps } from "../shared/taskDates";
 
 interface ExportScope {
   tasks: Task[];
@@ -46,19 +46,10 @@ export function selectTasksForExcel(
     const selected = filtered.filter((task) =>
       day
         ? calendarTaskOnDay(task, day)
-        : task.status === "done"
-          ? completedDay(task)?.startsWith(month)
-          : scheduledSpanOverlaps(task, `${month}-01`, `${month}-31`),
+        : scheduledSpanOverlaps(task, `${month}-01`, `${month}-31`),
     );
-    // 未安排任务没有日期，不应因当前日期范围筛选被漏掉；搜索和状态筛选仍照常生效。
-    const unscheduled = applyFilters(views, {
-      ...options.filter,
-      priorities: [],
-      dateFrom: null,
-      dateTo: null,
-    }).filter((task) => task.status === "unscheduled");
     return {
-      tasks: [...selected, ...unscheduled],
+      tasks: selected,
       fileName: `妥了任务_日历_${day ?? month}_${clock}.xlsx`,
     };
   }

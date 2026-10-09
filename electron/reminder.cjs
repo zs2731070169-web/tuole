@@ -16,14 +16,38 @@ function reminderMinutesOfDay(value) {
   return hour <= 23 && minute <= 59 ? hour * 60 + minute : 9 * 60;
 }
 
+// 执行期 = 日期集合（2026-10-09 模型改造）；磁盘上渲染层完成一次写盘前可能仍是旧区间键，
+// 此处双读展开（与 storage.ts 迁移单点同口径的只读版）
+function taskDays(task) {
+  if (Array.isArray(task.scheduledDates)) return task.scheduledDates;
+  if (typeof task.scheduledDate === "string") {
+    const end = typeof task.dueDate === "string" && task.dueDate >= task.scheduledDate ? task.dueDate : task.scheduledDate;
+    const days = [];
+    const cursor = new Date(`${task.scheduledDate}T00:00:00`);
+    const endDate = new Date(`${end}T00:00:00`);
+    // 3700 天 ≈ 10 年封顶，防脏数据死循环
+    for (let i = 0; i < 3700 && cursor <= endDate; i++) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+      days.push(key);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days;
+  }
+  return [];
+}
+
 function dueKind(task, day) {
-  if (!task || task.draft === true || task.completedAt || !task.scheduledDate) return null;
-  if (typeof task.id !== "string" || !task.id || typeof task.scheduledDate !== "string") return null;
-  if (task.scheduledDate > day) return null;
-  const end = typeof task.dueDate === "string" && task.dueDate >= task.scheduledDate
-    ? task.dueDate
-    : task.scheduledDate;
-  return end < day ? "overdue" : "today";
+  if (!task || task.draft === true || task.completedAt) return null;
+  if (typeof task.id !== "string" || !task.id) return null;
+  const days = taskDays(task);
+  // 日期与生命周期独立：显式 null 表示未安排，即使已有所属日也不提醒。
+  // undefined 保留旧数据兼容（有日期即按旧口径视为已开始）。
+  if (task.startedAt === null) return null;
+  if (days.length === 0) return null;
+  if (days[0] > day) return null; // 首个执行日在未来
+  if (days.includes(day)) return "today";
+  // 末日已过 = 欠账；夹在首末之间的空档日与状态机同口径计「今天」
+  return days[days.length - 1] < day ? "overdue" : "today";
 }
 
 function reminderMessage(tasks, lang) {

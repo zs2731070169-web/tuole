@@ -5,6 +5,11 @@
 import type { Task, Settings, ViewMode } from "../shared/types";
 import { DEFAULT_SETTINGS, VIEW_MODES } from "../shared/types";
 import { STORAGE_KEYS } from "../shared/constants";
+import { normalizeTodoItems } from "../shared/types";
+import { normalizeTags } from "../shared/tags";
+import { normalizeGroup } from "../shared/groups";
+import { expandLegacySpan, normalizeScheduledDays } from "../shared/taskDates";
+import { todayKey, toDateKey } from "./date";
 import { getDesktopStorageBridge, type DesktopStorageFile } from "./desktopBridge";
 
 // 已下线的历史键（备份队列 / 标签库），启动时清理一次，避免遗留占用空间
@@ -70,17 +75,65 @@ export function cleanupLegacyKeys(): void {
   }
 }
 
+// 外部任务条目的形状归一（loadTasks 与 importTasks 共用的唯一迁移点）：
+// - recurrence 已随「重复」功能整体移除而剥离（2026-10）；
+// - tags / group 载入时归一（坏形状 → 空值）；
+// - 待办项旧键折转：2026-10-09 待办项（原「子任务」）内部字段正名前，数据用旧键
+//   `subtasks` 存待办项——此处折转到 `todos` 并剥离旧键。**这是全库唯一允许出现
+//   该旧键名的位置**（删掉它，存量数据的待办项会整体丢失）；磁盘上的旧键副本在
+//   下次写盘时自然清洗；
+// - 执行期模型迁移（2026-10-09）：旧 `scheduledDate`/`dueDate` 连续区间在此展开为
+//   `scheduledDates` 全量日期集合并剥离旧键（同样唯一允许出现旧键名的位置）
+function sanitizeTaskEntry(
+  entry: Task & { recurrence?: unknown; subtasks?: unknown; scheduledDate?: unknown; dueDate?: unknown },
+): Task {
+  const {
+    recurrence: _recurrence,
+    subtasks: _legacyTodos,
+    scheduledDate: _legacyStart,
+    dueDate: _legacyEnd,
+    ...rest
+  } = entry;
+  // 新字段缺失/为空时才回退展开旧区间，避免把合法的「未安排」误判成旧数据
+  const hasNewField = Array.isArray(entry.scheduledDates);
+  const legacyDates =
+    !hasNewField && typeof _legacyStart === "string"
+      ? expandLegacySpan(_legacyStart, typeof _legacyEnd === "string" ? _legacyEnd : null)
+      : [];
+  const normalizedDates = normalizeScheduledDays(hasNewField ? entry.scheduledDates : legacyDates);
+  const parkedDates = normalizeScheduledDays([entry.parkedDate]);
+  const created = new Date(entry.createdAt);
+  const fallbackDay = parkedDates[0] ?? (!Number.isNaN(created.getTime()) ? toDateKey(created) : todayKey());
+  const scheduledDates = normalizedDates.length > 0 ? normalizedDates : [fallbackDay];
+  const startedAt = typeof entry.startedAt === "string"
+    ? entry.startedAt
+    : entry.startedAt === null
+      ? null
+      : normalizedDates.length > 0
+        ? (entry.updatedAt ?? entry.createdAt)
+        : null;
+  return {
+    ...rest,
+    scheduledDates,
+    startedAt,
+    tags: normalizeTags(entry.tags),
+    group: normalizeGroup(entry.group),
+    todos: normalizeTodoItems(entry.todos ?? _legacyTodos),
+  } as Task;
+}
+
+/** 整批外部任务归一（旧快照/旧导出 JSON 恢复入口用）：见 sanitizeTaskEntry */
+export function sanitizeTaskEntries(entries: Task[]): Task[] {
+  return entries.map((entry) => sanitizeTaskEntry(entry));
+}
+
 export function loadTasks(): Task[] {
   try {
     const raw = readRaw(STORAGE_KEYS.tasks);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    // 去掉历史版本残留的 tags / recurrence 字段（recurrence 随「重复」功能整体移除而剥离，2026-10）
-    return parsed.map((t: Task & { tags?: unknown; recurrence?: unknown }) => {
-      const { tags: _tags, recurrence: _recurrence, ...rest } = t;
-      return rest as Task;
-    });
+    return parsed.map((t: Parameters<typeof sanitizeTaskEntry>[0]) => sanitizeTaskEntry(t));
   } catch {
     return [];
   }

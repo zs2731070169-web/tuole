@@ -1,24 +1,30 @@
 // Excel 任务导入/导出（SheetJS，纯前端离线）
-// 任务与子任务分表：任务用本次导出的序号关联，应用内部 id 不进入报表。
+// 任务与待办项分表（2026-10 由「子任务」更名，导入兼容旧「子任务」表名）：任务用本次导出的序号关联，应用内部 id 不进入报表。
 import * as XLSX from "xlsx";
-import type { Task, Priority, Subtask } from "../shared/types";
+import type { Task, Priority, Todo } from "../shared/types";
 import { makeId, emptyTask } from "../stores/useTaskStore";
+import { parseTags, formatTags } from "../shared/tags";
+import { expandLegacySpan, isContiguousDays } from "../shared/taskDates";
 import { todayKey } from "./date";
 
 const SHEET = "任务";
-const SUBTASK_SHEET = "子任务";
+const TODO_SHEET = "待办项";
+// 旧版导出文件里的待办项表名（导入时兼容识别，导出恒用新名）
+const LEGACY_TODO_SHEET = "子任务";
 const META_SHEET = "__妥了关联";
 const HEADERS = [
   "序号",
   "标题",
-  "说明",
+  "备注",
+  "标签",
+  "分组",
   "优先级",
   "安排日期",
   "截止日期",
   "创建时间",
   "完成时间",
 ] as const;
-const SUBTASK_HEADERS = ["所属任务序号", "所属任务标题", "子任务", "已完成"] as const;
+const TODO_HEADERS = ["所属任务序号", "所属任务标题", "待办项", "已完成"] as const;
 
 const PRIORITY_LABEL: Record<Priority, string> = { high: "高", medium: "中", low: "低", none: "无" };
 const LABEL_PRIORITY: Record<string, Priority> = { 高: "high", 中: "medium", 低: "low", 无: "none", "": "none" };
@@ -66,7 +72,29 @@ function excelLocalDateTime(iso: string | null): number | null {
   return (wall - Date.UTC(1899, 11, 30)) / 86400000;
 }
 
-function parseSubtasks(text: string): Subtask[] {
+// 执行期导出单元格：连续 = 首日（截止日期列承载末日）；分散（拖拽逐日移动产生）=
+// 顿号连接全量日期列表（截止日期列留空，避免与列表重复）
+function scheduledCell(task: Task): string {
+  if (isContiguousDays(task)) return task.scheduledDates[0] ?? "";
+  return task.scheduledDates.join("、");
+}
+
+// 执行期导入：安排日期列支持顿号/逗号分隔多值（分散导出的往返）；单值 + 截止日期 =
+// 连续区间展开（旧表与连续导出的往返）
+function parseScheduledDates(startDateCell: unknown, endDateCell: unknown): string[] {
+  const raw = String(startDateCell ?? "").trim();
+  if (!raw) return [];
+  const parts = raw
+    .split(/[,，、;；|｜]+/)
+    .map((part) => dateCell(part))
+    .filter((d): d is string => !!d);
+  const unique = [...new Set(parts)].sort();
+  if (unique.length !== 1) return unique;
+  const end = dateCell(endDateCell);
+  return end && end > unique[0] ? expandLegacySpan(unique[0], end) : unique;
+}
+
+function parseTodos(text: string): Todo[] {
   if (!text.trim()) return [];
   return text
     .split(/[|｜\n]/)
@@ -75,7 +103,7 @@ function parseSubtasks(text: string): Subtask[] {
     .map((raw) => {
       const done = /^\[[xX✓]\]/.test(raw);
       const title = raw.replace(/^\[(?:[xX✓]| )\]\s*/, "").replace(/^-\s*/, "").trim();
-      return { id: makeId(), title: title || "子任务", done };
+      return { id: makeId(), title: title || "待办项", done };
     });
 }
 
@@ -83,16 +111,19 @@ export function buildTaskWorkbook(tasks: Task[]): XLSX.WorkBook {
   const rows = tasks.map((t, index) => ({
     序号: index + 1,
     标题: t.title,
-    说明: t.note,
+    备注: t.note,
+    标签: formatTags(t.tags),
+    分组: t.group ?? "",
     优先级: PRIORITY_LABEL[t.priority],
-    安排日期: t.scheduledDate ?? "",
-    截止日期: t.dueDate ?? "",
+    安排日期: scheduledCell(t),
+    截止日期: isContiguousDays(t) && t.scheduledDates.length > 1 ? t.scheduledDates[t.scheduledDates.length - 1] : "",
     创建时间: "",
     完成时间: "",
   }));
   const ws = XLSX.utils.json_to_sheet(rows, { header: [...HEADERS] });
   tasks.forEach((task, index) => {
-    for (const [column, iso] of [[6, task.createdAt], [7, task.completedAt]] as const) {
+    // 标签/分组列插在备注之后：创建/完成时间列号随之右移两位（8/9）
+    for (const [column, iso] of [[8, task.createdAt], [9, task.completedAt]] as const) {
       const serial = excelLocalDateTime(iso);
       if (serial !== null) {
         ws[XLSX.utils.encode_cell({ r: index + 1, c: column })] = {
@@ -102,24 +133,29 @@ export function buildTaskWorkbook(tasks: Task[]): XLSX.WorkBook {
     }
   });
   ws["!cols"] = [
-    { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 10 }, { wch: 14 },
+    { wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 14 },
     { wch: 14 }, { wch: 22 }, { wch: 22 }, { wch: 16 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, SHEET);
-  const subRows = tasks.flatMap((task, index) => task.subtasks.map((sub) => ({
+  const subRows = tasks.flatMap((task, index) => task.todos.map((todo) => ({
     所属任务序号: index + 1,
     所属任务标题: task.title,
-    子任务: sub.title,
-    已完成: sub.done ? "是" : "否",
+    待办项: todo.title,
+    已完成: todo.done ? "是" : "否",
   })));
   if (subRows.length > 0) {
-    const subs = XLSX.utils.json_to_sheet(subRows, { header: [...SUBTASK_HEADERS] });
-    subs["!cols"] = [{ wch: 16 }, { wch: 30 }, { wch: 40 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, subs, SUBTASK_SHEET);
+    const todoSheet = XLSX.utils.json_to_sheet(subRows, { header: [...TODO_HEADERS] });
+    todoSheet["!cols"] = [{ wch: 16 }, { wch: 30 }, { wch: 40 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, todoSheet, TODO_SHEET);
   }
   // 只供应用再次导入时精确匹配；普通工作表不展示内部标识。
-  const meta = XLSX.utils.json_to_sheet(tasks.map((task, index) => ({ 序号: index + 1, 关联: task.id })));
+  const meta = XLSX.utils.json_to_sheet(tasks.map((task, index) => ({
+    序号: index + 1,
+    关联: task.id,
+    // 隐藏往返元数据：日期与生命周期独立，未安排任务也有日期。
+    已开始: task.startedAt ?? "",
+  })));
   XLSX.utils.book_append_sheet(wb, meta, META_SHEET);
   wb.Workbook = { Sheets: wb.SheetNames.map((name) => ({ Hidden: name === META_SHEET ? 2 : 0 })) };
   return wb;
@@ -133,15 +169,35 @@ export function exportTasksToXlsx(tasks: Task[], fileName?: string): void {
 export interface ParseResult {
   tasks: Task[];
   skipped: number; // 无标题而被跳过的行数
+  hasTagsColumn: boolean; // 文件任务表是否含「标签」列：无列时导入更新不得清空存量标签（旧版导出兼容）
+  hasGroupColumn: boolean; // 同上，「分组」列（2026-10-09 新增）
+}
+
+// 表头列是否存在（与 pick 同口径的匹配：先精确、后包含；任一行命中即算存在）
+function hasColumn(rows: Record<string, unknown>[], keys: string[]): boolean {
+  return rows.some((row) =>
+    Object.keys(row).some((k) => {
+      const norm = k.trim().toLowerCase();
+      return keys.some((want) => norm === want || norm.includes(want));
+    }),
+  );
+}
+
+// 分组单元格 → 单值分组：trim 后非空才有效，空/缺失 = 无分组
+function groupCell(value: unknown): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 /** 解析上传的表格文件（xlsx/xls/csv），按表头名匹配列，缺列走默认值 */
 export function parseTasksFromWorkbook(data: ArrayBuffer): ParseResult {
   const wb = XLSX.read(data, { type: "array" });
   const first = wb.SheetNames[0];
-  if (!first) return { tasks: [], skipped: 0 };
+  if (!first) return { tasks: [], skipped: 0, hasTagsColumn: false, hasGroupColumn: false };
   const sheet = wb.Sheets[first];
   const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+  const hasTagsColumn = hasColumn(json, ["标签", "tags"]);
+  const hasGroupColumn = hasColumn(json, ["分组", "group"]);
 
   const pick = (row: Record<string, unknown>, keys: string[]): unknown => {
     for (const want of keys) {
@@ -160,12 +216,16 @@ export function parseTasksFromWorkbook(data: ArrayBuffer): ParseResult {
   const tasks: Task[] = [];
   const byExportNumber = new Map<number, Task>();
   const sourceIds = new Map<number, string>();
+  const sourceStartedAt = new Map<number, string | null>();
   const metaSheet = wb.Sheets[META_SHEET];
   if (metaSheet) {
     for (const row of XLSX.utils.sheet_to_json<Record<string, unknown>>(metaSheet, { defval: "" })) {
       const number = Number(pick(row, ["序号"]));
       const id = String(pick(row, ["关联"]) ?? "").trim();
       if (Number.isInteger(number) && number > 0 && id) sourceIds.set(number, id);
+      if (Number.isInteger(number) && number > 0 && Object.prototype.hasOwnProperty.call(row, "已开始")) {
+        sourceStartedAt.set(number, isoCell(row["已开始"]));
+      }
     }
   }
   for (const row of json) {
@@ -179,15 +239,20 @@ export function parseTasksFromWorkbook(data: ArrayBuffer): ParseResult {
     const exportNumber = Number(pick(row, ["序号"]));
     const id = sourceIds.get(exportNumber) || String(pick(row, ["id"]) ?? "").trim() || makeId();
 
+    const scheduledDates = parseScheduledDates(pick(row, ["安排日期", "scheduled"]), pick(row, ["截止日期", "截止", "due"]));
     const task: Task = {
       ...emptyTask(),
       id,
       title,
       note: String(pick(row, ["说明", "备注", "note"]) ?? ""),
+      tags: parseTags(String(pick(row, ["标签", "tags"]) ?? "")),
+      group: groupCell(pick(row, ["分组", "group"])),
       priority: LABEL_PRIORITY[String(pick(row, ["优先级", "priority"]) ?? "").trim()] ?? "none",
-      scheduledDate: dateCell(pick(row, ["安排日期", "scheduled"])),
-      dueDate: dateCell(pick(row, ["截止日期", "截止", "due"])),
-      subtasks: parseSubtasks(String(pick(row, ["子任务", "subtask"]) ?? "")),
+      scheduledDates,
+      startedAt: sourceStartedAt.has(exportNumber)
+        ? sourceStartedAt.get(exportNumber)!
+        : scheduledDates.length > 0 ? createdAt : null,
+      todos: parseTodos(String(pick(row, ["待办项", "子任务", "todo"]) ?? "")),
       createdAt,
       completedAt,
       completedReason: completedAt ? "manual" : null,
@@ -196,16 +261,17 @@ export function parseTasksFromWorkbook(data: ArrayBuffer): ParseResult {
     tasks.push(task);
     if (Number.isInteger(exportNumber) && exportNumber > 0) byExportNumber.set(exportNumber, task);
   }
-  const subSheet = wb.Sheets[SUBTASK_SHEET];
+  // 待办项分表：新名「待办项」，旧版导出的「子任务」表同样识别（列头两个名字都认）
+  const subSheet = wb.Sheets[TODO_SHEET] ?? wb.Sheets[LEGACY_TODO_SHEET];
   if (subSheet) {
     const subRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(subSheet, { defval: "" });
     for (const row of subRows) {
       const parent = byExportNumber.get(Number(pick(row, ["所属任务序号"])));
-      const title = String(pick(row, ["子任务"]) ?? "").trim();
+      const title = String(pick(row, ["待办项", "子任务"]) ?? "").trim();
       if (!parent || !title) continue;
       const done = /^(是|已完成|true|1|yes|y)$/i.test(String(pick(row, ["已完成"]) ?? "").trim());
-      parent.subtasks.push({ id: makeId(), title, done });
+      parent.todos.push({ id: makeId(), title, done });
     }
   }
-  return { tasks, skipped };
+  return { tasks, skipped, hasTagsColumn, hasGroupColumn };
 }

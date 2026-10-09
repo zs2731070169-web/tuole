@@ -129,7 +129,13 @@ export function parseBackupFile(raw: string): Task[] | null {
     if (!arr) return null;
     const tasks = arr.filter(
       (t: unknown): t is Task =>
-        !!t && typeof (t as Task).id === "string" && typeof (t as Task).title === "string" && typeof (t as Task).scheduledDate !== "undefined",
+        !!t &&
+        typeof (t as Task).id === "string" &&
+        typeof (t as Task).title === "string" &&
+        // 执行期字段：新模型（scheduledDates 数组）或旧区间（scheduledDate）任一存在即算合法条目，
+        // 归一到新模型由 importTasks → sanitizeTaskEntries 统一完成
+        (Array.isArray((t as Task).scheduledDates) ||
+          typeof (t as { scheduledDate?: unknown }).scheduledDate !== "undefined"),
     );
     return tasks.length > 0 ? tasks : null;
   } catch {

@@ -28,9 +28,10 @@ function makeTask(seq: number): Task {
     title: `任务${seq}`,
     note: "",
     priority: "none",
-    scheduledDate: "2026-10-07",
-    dueDate: null,
-    subtasks: [],
+    scheduledDates: ["2026-10-07"],todos: [],
+    startedAt: "2026-10-01T00:00:00.000Z",
+    tags: [],
+    group: null,
     createdAt: "2026-10-01T00:00:00.000Z",
     completedAt: null,
     completedReason: null,
@@ -88,7 +89,7 @@ describe("parseBackupFile", () => {
   });
 
   it("形状不完整的条目被过滤，合法条目保留", () => {
-    const mixed = [{ id: "a", title: "ok", scheduledDate: null }, { id: "b" }, "junk"];
+    const mixed = [{ id: "a", title: "ok", scheduledDates: []}, { id: "b" }, "junk"];
     expect(parseBackupFile(JSON.stringify({ tasks: mixed }))).toHaveLength(1);
   });
 });
@@ -102,6 +103,33 @@ describe("replaceTasksWithRecoveryPoint", () => {
     expect(replaceTasksWithRecoveryPoint(replacement)).toBe(1);
     expect(useTaskStore.getState().tasks).toEqual(replacement);
     expect(loadBackups()[0].tasks).toEqual(current);
+  });
+
+  it("恢复旧版快照（任务无 tags 字段）后归一为合法数组，工作台渲染不崩", () => {
+    // 旧版 loadTasks 曾显式剥离 tags，升级前的全部快照与导出 JSON 都没有该字段；
+    // importTasks 是 loadTasks 之外唯一整批写入 store 的入口，必须在此补形状
+    useTaskStore.setState({ tasks: [] });
+    const legacy = [{ ...makeTask(1), tags: undefined }] as unknown as Task[];
+    expect(replaceTasksWithRecoveryPoint(legacy)).toBe(1);
+    expect(useTaskStore.getState().tasks[0].tags).toEqual([]);
+
+    // 坏形状（字符串）同样归一，不进渲染层
+    replaceTasksWithRecoveryPoint([{ ...makeTask(2), tags: "工作" }] as unknown as Task[]);
+    expect(useTaskStore.getState().tasks[0].tags).toEqual([]);
+  });
+
+  it("恢复旧版快照（subtasks 旧键）迁移为 todos，勾选状态保留", () => {
+    // 2026-10-09 内部正名：旧快照的任务用 subtasks 键，恢复时经 importTasks 折转
+    useTaskStore.setState({ tasks: [] });
+    const legacy = [{
+      ...makeTask(3),
+      todos: undefined, // 旧数据没有 todos 键
+      subtasks: [{ id: "s1", title: "旧待办", done: true }],
+    }] as unknown as Task[];
+    replaceTasksWithRecoveryPoint(legacy);
+    const restored = useTaskStore.getState().tasks[0];
+    expect(restored.todos).toEqual([{ id: "s1", title: "旧待办", done: true }]);
+    expect(restored).not.toHaveProperty("subtasks");
   });
 });
 

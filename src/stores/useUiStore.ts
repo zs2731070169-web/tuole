@@ -37,17 +37,11 @@ interface UiState {
   selectedIds: string[]; // 选中（高亮）任务：单击卡片进入，是单击高亮的目标集合
   checkedIds: string[]; // 打勾（批量勾选框）任务：批量操作条的目标。与选中分离——单击选中不自动打勾
   editingId: string | null; // 打开的任务详情/编辑面板
-  expandedIds: string[]; // 展开「子任务面板」的任务（勾选在行内进行，不进编辑抽屉）
+  expandedIds: string[]; // 展开「待办项面板」的任务（勾选在行内进行，不进编辑抽屉；2026-10 由「子任务」更名）
   settingsOpen: boolean;
   newTaskOpen: boolean;
   draggingStatus: TaskStatus | null; // 拖拽中任务的派生状态（dragover 阶段读不到 dataTransfer，已完成栏据此拒绝不可结束的任务）
   draggingTaskId: string | null; // 拖拽中的任务 id：dragover 阶段判「同栏内排序放置」用（dataTransfer 同样读不到）
-  // 「任务已保存到 {日期}」跳转横幅（第一方组件，2026-10 重写）：新建草稿保存到非当前选中日时
-  // 弹出，点「查看」跳到该日锚定的工作台。曾用 sonner toast 的 action 按钮实现，用户桌面端
-  // 实测点击无响应（E2E 含真实鼠标事件均通过但真机不跳，第三方通知层不可控），整体废弃
-  creationNotice: { dateKey: string } | null;
-  showCreationNotice: (dateKey: string) => void;
-  dismissCreationNotice: () => void;
   setView: (v: ViewMode) => void;
   openDayInWorkbench: (dayKey: string) => void; // 日历 chip 点击：锚定该日跳工作台查看，并记录可返回日历
   goBackToReturnView: () => void; // 工作台「返回日历」等回退入口，用完即清空返回态
@@ -79,9 +73,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   newTaskOpen: false,
   draggingStatus: null,
   draggingTaskId: null,
-  creationNotice: null,
-  showCreationNotice: (dateKey) => set({ creationNotice: { dateKey } }),
-  dismissCreationNotice: () => set({ creationNotice: null }),
   setWorkbenchDay: (day) => set({ workbenchDay: day }),
   // 手动切视图（TopBar）一律清空返回态——用户自己导航后「返回」按钮即失效
   setView: (v) => {
@@ -143,7 +134,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     }
     set({ editingId: id, selectedIds: [id] });
   },
-  // 子任务面板展开态：可同时展开多条，纯界面态不入库
+  // 待办项面板展开态：可同时展开多条，纯界面态不入库（2026-10 由「子任务」更名）
   toggleExpanded: (id) => {
     const cur = get().expandedIds;
     set({ expandedIds: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });

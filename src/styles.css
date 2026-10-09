@@ -186,7 +186,7 @@
 }
 
 /* 任务项区域一律手指光标（浏览器版产品红线）：鼠标移入任务项任何位置——卡片、勾选框、
-   元信息、hover 工具条、子任务面板——一律 pointer，禁止箭头/I-beam。
+   元信息、hover 工具条、待办项面板——一律 pointer，禁止箭头/I-beam。
    实现要点：!important + 通配后代 + 伪元素，压过任何子组件自带的 cursor 声明
   （shadcn 生成件的 cursor-default 等），并与 Tailwind 工具类的排序/特异性完全解耦——
    此前用 [&_*]:cursor-pointer 工具类实现，同特异性下受样式表排序影响，不可靠。
@@ -267,3 +267,40 @@ html.desktop-cursors :is(input, textarea, [contenteditable]) * {
 [role="alertdialog"] {
   -webkit-app-region: no-drag;
 }
+
+/* 隐藏滚动条但保留滚动能力（2026-10-09 用户要求编辑抽屉完全无滑条）：
+   滚轮/触控板照常滚动，只是不绘制滚动条。Chromium 走 ::-webkit-scrollbar，
+   Firefox 走 scrollbar-width；只挂在明确要求的容器上，勿全局滥用 */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── 任务分组色板 group-tone-0..9（2026-10-09）──────────────────────────────
+   同一分组的任务在日历格 chip 与任务卡分组 chip 共用同一浅色填充，
+   档位由分组名确定性哈希分配（shared/groups.ts），免配置、跨会话稳定。分组 = 独立单值字段，与标签解耦。
+   压低 chroma（是底色不是数据强调色）；「浅底 + 深字」明暗双模各自成对。
+   优先级约定：状态语义色（逾期红 / 完成绿 / 未安排灰）高于分组色——日历 chip
+   只对活动任务（today/upcoming）应用分组色，欠账与完结不可被分组色淹没 */
+.group-tone-0  { background-color: oklch(0.952 0.030 20);  color: oklch(0.45 0.115 20); }
+.group-tone-1  { background-color: oklch(0.952 0.035 55);  color: oklch(0.46 0.110 55); }
+.group-tone-2  { background-color: oklch(0.955 0.035 90);  color: oklch(0.44 0.105 90); }
+.group-tone-3  { background-color: oklch(0.952 0.035 125); color: oklch(0.42 0.105 125); }
+.group-tone-4  { background-color: oklch(0.950 0.030 160); color: oklch(0.42 0.100 160); }
+.group-tone-5  { background-color: oklch(0.950 0.030 195); color: oklch(0.44 0.100 195); }
+.group-tone-6  { background-color: oklch(0.952 0.035 230); color: oklch(0.44 0.110 230); }
+.group-tone-7  { background-color: oklch(0.952 0.035 265); color: oklch(0.46 0.110 265); }
+.group-tone-8  { background-color: oklch(0.952 0.035 300); color: oklch(0.46 0.110 300); }
+.group-tone-9  { background-color: oklch(0.952 0.035 335); color: oklch(0.46 0.115 335); }
+.dark .group-tone-0  { background-color: oklch(0.30 0.045 20);  color: oklch(0.83 0.085 20); }
+.dark .group-tone-1  { background-color: oklch(0.30 0.050 55);  color: oklch(0.83 0.080 55); }
+.dark .group-tone-2  { background-color: oklch(0.28 0.050 90);  color: oklch(0.85 0.080 90); }
+.dark .group-tone-3  { background-color: oklch(0.29 0.045 125); color: oklch(0.84 0.080 125); }
+.dark .group-tone-4  { background-color: oklch(0.30 0.040 160); color: oklch(0.84 0.075 160); }
+.dark .group-tone-5  { background-color: oklch(0.30 0.040 195); color: oklch(0.85 0.075 195); }
+.dark .group-tone-6  { background-color: oklch(0.30 0.045 230); color: oklch(0.85 0.085 230); }
+.dark .group-tone-7  { background-color: oklch(0.29 0.045 265); color: oklch(0.83 0.085 265); }
+.dark .group-tone-8  { background-color: oklch(0.30 0.045 300); color: oklch(0.83 0.085 300); }
+.dark .group-tone-9  { background-color: oklch(0.30 0.050 335); color: oklch(0.83 0.090 335); }

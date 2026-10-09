@@ -1,33 +1,113 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { taskIdsOnScheduledDays, unscheduledTaskIdsParkedOnDays } from "../src/shared/calendar";
+import { planDeleteDaysPrune } from "../src/shared/calendar";
 import { useCalendarStore } from "../src/stores/useCalendarStore";
+import { useTaskStore, emptyTask } from "../src/stores/useTaskStore";
 import { todayKey } from "../src/lib/date";
 
-describe("taskIdsOnScheduledDays", () => {
-  const tasks = [
-    { id: "a", scheduledDate: "2026-10-07" },
-    { id: "b", scheduledDate: "2026-10-07" },
-    { id: "c", scheduledDate: "2026-10-08" },
-    { id: "d", scheduledDate: null },
-  ];
+const OCT5_9 = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"];
 
-  it("单日返回当天全部任务，不包含未安排任务", () => {
-    expect(taskIdsOnScheduledDays(tasks, ["2026-10-07"])).toEqual(["a", "b"]);
-  });
-
-  it("多日合并任务且不受重复日期影响", () => {
-    expect(taskIdsOnScheduledDays(tasks, ["2026-10-07", "2026-10-08", "2026-10-07"])).toEqual([
-      "a",
-      "b",
-      "c",
+describe("planDeleteDaysPrune 按日修剪（2026-10-10 用户决策：删一天只移除那一天）", () => {
+  it("多天任务删其中一天：只修剪该日，任务保留、其余日期不动", () => {
+    const plan = planDeleteDaysPrune(
+      [{ id: "span", scheduledDates: OCT5_9, completedAt: null }],
+      ["2026-10-07"],
+      todayKey(),
+    );
+    expect(plan.deleteIds).toEqual([]);
+    expect(plan.prunes).toEqual([
+      { id: "span", scheduledDates: ["2026-10-05", "2026-10-06", "2026-10-08", "2026-10-09"] },
     ]);
   });
 
-  it("跨天任务命中覆盖日期且只删除一次；已完成任务按完成日归属", () => {
-    const span = { id: "span", scheduledDate: "2026-10-05", dueDate: "2026-10-09", completedAt: null };
-    const done = { id: "done", scheduledDate: "2026-10-05", dueDate: "2026-10-09", completedAt: "2026-10-10T08:00:00" };
-    expect(taskIdsOnScheduledDays([span, done], ["2026-10-07", "2026-10-08"])).toEqual(["span"]);
-    expect(taskIdsOnScheduledDays([span, done], ["2026-10-10"])).toEqual(["done"]);
+  it("多天任务删多天（含分散选中）：一并修剪", () => {
+    const plan = planDeleteDaysPrune(
+      [{ id: "span", scheduledDates: OCT5_9, completedAt: null }],
+      ["2026-10-05", "2026-10-09"],
+      todayKey(),
+    );
+    expect(plan.prunes).toEqual([
+      { id: "span", scheduledDates: ["2026-10-06", "2026-10-07", "2026-10-08"] },
+    ]);
+  });
+
+  it("执行期全部命中所选日：整条删除（任务不再有存在日）", () => {
+    const plan = planDeleteDaysPrune(
+      [
+        { id: "span", scheduledDates: OCT5_9, completedAt: null },
+        { id: "single", scheduledDates: ["2026-10-07"], completedAt: null },
+      ],
+      OCT5_9,
+      todayKey(),
+    );
+    expect(plan.deleteIds).toEqual(["span", "single"]);
+    expect(plan.prunes).toEqual([]);
+  });
+
+  it("未命中任何所选日的任务不受影响", () => {
+    const plan = planDeleteDaysPrune(
+      [{ id: "other", scheduledDates: ["2026-10-20"], completedAt: null }],
+      ["2026-10-07"],
+      todayKey(),
+    );
+    expect(plan).toEqual({ deleteIds: [], prunes: [] });
+  });
+
+  it("未安排任务按停靠日归属：命中整条删除（缺失兜底今天）", () => {
+    const plan = planDeleteDaysPrune(
+      [
+        { id: "parked", scheduledDates: [], completedAt: null, parkedDate: "2026-10-07" },
+        { id: "fallback", scheduledDates: [], completedAt: null, parkedDate: undefined },
+      ],
+      ["2026-10-07"],
+      "2026-10-07",
+    );
+    expect(plan.deleteIds).toEqual(["parked", "fallback"]);
+  });
+
+  it("已完成任务仍按原日期归属并逐日修剪", () => {
+    const plan = planDeleteDaysPrune(
+      [
+        { id: "done", scheduledDates: OCT5_9, completedAt: "2026-10-10T08:00:00" },
+        { id: "done2", scheduledDates: ["2026-10-05"], completedAt: "2026-10-12T08:00:00" },
+      ],
+      ["2026-10-07"],
+      todayKey(),
+    );
+    expect(plan.deleteIds).toEqual([]);
+    expect(plan.prunes).toEqual([{ id: "done", scheduledDates: ["2026-10-05", "2026-10-06", "2026-10-08", "2026-10-09"] }]);
+  });
+
+  it("草稿不入删除范围（与列表渲染同口径）", () => {
+    const plan = planDeleteDaysPrune(
+      [{ id: "draft", scheduledDates: ["2026-10-07"], completedAt: null, draft: true }],
+      ["2026-10-07"],
+      todayKey(),
+    );
+    expect(plan).toEqual({ deleteIds: [], prunes: [] });
+  });
+
+  it("空选中 = 空规划", () => {
+    expect(planDeleteDaysPrune([{ id: "a", scheduledDates: ["2026-10-07"], completedAt: null }], [], todayKey())).toEqual(
+      { deleteIds: [], prunes: [] },
+    );
+  });
+});
+
+describe("deleteDaysFromTasks store 集成（按日修剪全链路）", () => {
+  it("删 7 号：跨天任务保留其余四天、单日任务整条删除、无关任务不动", () => {
+    const span = emptyTask({ id: "span", title: "跨天", scheduledDates: OCT5_9 });
+    const single = emptyTask({ id: "single", title: "单日", scheduledDates: ["2026-10-07"] });
+    const other = emptyTask({ id: "other", title: "别的天", scheduledDates: ["2026-10-20"] });
+    useTaskStore.setState({ tasks: [span, single, other] });
+
+    useTaskStore.getState().deleteDaysFromTasks(["2026-10-07"]);
+    const tasks = useTaskStore.getState().tasks;
+    expect(tasks.map((t) => t.id).sort()).toEqual(["other", "span"]);
+    expect(tasks.find((t) => t.id === "span")!.scheduledDates).toEqual([
+      "2026-10-05", "2026-10-06", "2026-10-08", "2026-10-09",
+    ]);
+    // 修剪过的任务落 updatedAt（与手动编辑同口径参与提醒判定）
+    expect(tasks.find((t) => t.id === "span")!.updatedAt).toBeTruthy();
   });
 });
 
@@ -41,60 +121,20 @@ describe("calendar delete selection", () => {
     });
   });
 
-  it("进入模式后可切换一个或多个日期，取消时清空", () => {
+  it("进入删除模式后选日（Finder 单选语义），退出复位", () => {
     const store = useCalendarStore.getState();
     store.startDeleteMode();
-    expect(useCalendarStore.getState()).toMatchObject({ deleteMode: true, deleteDays: [] });
+    expect(useCalendarStore.getState().deleteMode).toBe(true);
 
-    useCalendarStore.getState().toggleDeleteDay("2026-10-07");
-    useCalendarStore.getState().toggleDeleteDay("2026-10-08");
-    expect(useCalendarStore.getState().deleteDays).toEqual(["2026-10-07", "2026-10-08"]);
+    store.selectDeleteDay("2026-10-07");
+    expect(useCalendarStore.getState().deleteDays).toEqual(["2026-10-07"]);
+    // 再点同一天 = 重置为单选（selectDeleteDay 幂等单选）
+    store.selectDeleteDay("2026-10-07");
+    expect(useCalendarStore.getState().deleteDays).toEqual(["2026-10-07"]);
 
-    useCalendarStore.getState().toggleDeleteDay("2026-10-07");
-    expect(useCalendarStore.getState().deleteDays).toEqual(["2026-10-08"]);
-
-    useCalendarStore.getState().cancelDeleteMode();
-    expect(useCalendarStore.getState()).toMatchObject({ deleteMode: false, deleteDays: [] });
-  });
-
-  it("选格删除范围连带停靠未安排：taskIdsOnScheduledDays ∪ unscheduledTaskIdsParkedOnDays（2026-10 口径）", () => {
-    // 组件层（CalendarLeadingBar）的组合口径锚点：选中日期格 = 执行期覆盖该日的任务 + 停靠该日的未安排
-    const tasks = [
-      { id: "s1", scheduledDate: "2026-10-08", completedAt: null },
-      { id: "u1", scheduledDate: null, completedAt: null, parkedDate: "2026-10-08" },
-      { id: "u2", scheduledDate: null, completedAt: null, parkedDate: "2026-10-09" },
-    ];
-    const scope = [
-      ...taskIdsOnScheduledDays(tasks, ["2026-10-08"]),
-      ...unscheduledTaskIdsParkedOnDays(tasks, ["2026-10-08"], todayKey()),
-    ];
-    expect(scope.sort()).toEqual(["s1", "u1"]);
-  });
-});
-
-describe("unscheduledTaskIdsParkedOnDays（删除模式的未安排补充范围，按停靠日收窄）", () => {
-  const today = "2026-10-08";
-  const tasks = [
-    { id: "a", scheduledDate: null, completedAt: null, parkedDate: "2026-10-08" }, // 停靠所选日 ✓
-    { id: "b", scheduledDate: "2026-10-08", completedAt: null, parkedDate: null }, // 已排期 ✗
-    { id: "c", scheduledDate: null, completedAt: "2026-10-06T10:00:00.000Z", parkedDate: "2026-10-08" }, // 已完成未安排 ✗
-    { id: "d", scheduledDate: null, completedAt: null, parkedDate: "2026-10-11" }, // 停靠别日 ✗
-    { id: "e", scheduledDate: null, completedAt: null, parkedDate: null }, // 无停靠日，兜底今天 ✓
-  ];
-
-  it("只收停靠在所选日期上的活动未安排任务（parkedDate 缺失兜底今天）", () => {
-    expect(unscheduledTaskIdsParkedOnDays(tasks, ["2026-10-08"], today)).toEqual(["a", "e"]);
-  });
-
-  it("多日选中 = 各日停靠命中并集", () => {
-    expect(unscheduledTaskIdsParkedOnDays(tasks, ["2026-10-11", "2026-10-08"], today)).toEqual([
-      "a",
-      "d",
-      "e",
-    ]);
-  });
-
-  it("无选中日期 = 空范围（开关不出现）", () => {
-    expect(unscheduledTaskIdsParkedOnDays(tasks, [], today)).toEqual([]);
+    store.cancelDeleteMode();
+    expect(useCalendarStore.getState().deleteMode).toBe(false);
+    expect(useCalendarStore.getState().deleteDays).toEqual([]);
+    expect(useCalendarStore.getState().deleteAnchorDay).toBeNull();
   });
 });

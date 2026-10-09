@@ -27,6 +27,9 @@ export function TaskIOButtons({ className }: Props) {
   const busyRef = useRef(false);
   const [pending, setPending] = useState<Task[] | null>(null);
   const [skipped, setSkipped] = useState(0);
+  // 导入文件是否带「标签」/「分组」列：旧版导出没有这些列，「未提及」不得清空存量值
+  const [hasTagsColumn, setHasTagsColumn] = useState(true);
+  const [hasGroupColumn, setHasGroupColumn] = useState(true);
 
   const doExport = async () => {
     const ui = useUiStore.getState();
@@ -74,12 +77,14 @@ export function TaskIOButtons({ className }: Props) {
       // 仅浏览器降级路径、且在系统面板关闭后才加载 SheetJS；桌面端弹窗动画不再
       // 与这个大模块的解析/初始化共享同一渲染帧。
       const { parseTasksFromWorkbook } = await import("../lib/excel");
-      const { tasks, skipped: sk } = parseTasksFromWorkbook(buf);
+      const { tasks, skipped: sk, hasTagsColumn: withTags, hasGroupColumn: withGroup } = parseTasksFromWorkbook(buf);
       if (tasks.length === 0) {
         toast.error(t("io.importFailed", lang));
         return;
       }
       setSkipped(sk);
+      setHasTagsColumn(withTags);
+      setHasGroupColumn(withGroup);
       setPending(tasks);
     } catch {
       toast.error(t("io.importFailed", lang));
@@ -120,13 +125,14 @@ export function TaskIOButtons({ className }: Props) {
     }
   };
 
-  const preview = pending ? planExcelImport(useTaskStore.getState().tasks, pending, "update") : null;
+  const importColumns = { incomingHasTagsColumn: hasTagsColumn, incomingHasGroupColumn: hasGroupColumn };
+  const preview = pending ? planExcelImport(useTaskStore.getState().tasks, pending, "update", importColumns) : null;
 
   const apply = (mode: "merge" | "update") => {
     if (!pending) return;
     // 只更新匹配任务；覆盖前留恢复点。JSON/快照的全量恢复仍使用独立入口。
     if (mode === "update" && preview && preview.updated > 0) saveCurrentSnapshot();
-    const result = useTaskStore.getState().importExcelTasks(pending, mode);
+    const result = useTaskStore.getState().importExcelTasks(pending, mode, importColumns);
     const msg = (mode === "update" ? t("io.importUpdated", lang) : t("io.importDone", lang))
       .replace("{added}", String(result.added))
       .replace("{matched}", String(result.matched))
@@ -138,6 +144,8 @@ export function TaskIOButtons({ className }: Props) {
     toast.success(msg + extra + ambiguous);
     setPending(null);
     setSkipped(0);
+    setHasTagsColumn(true);
+    setHasGroupColumn(true);
   };
 
   const btnCls =

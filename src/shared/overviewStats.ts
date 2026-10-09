@@ -11,7 +11,7 @@ import {
   toDateKey,
   todayKey,
 } from "../lib/date";
-import { completedDay, scheduleEnd, scheduledOnDay } from "./taskDates";
+import { completedDay, firstScheduledDay, scheduleEnd, scheduledOnDay } from "./taskDates";
 
 export interface OverviewStats {
   // —— 既有口径（StatsCard 六格 + 节奏图）——
@@ -123,7 +123,7 @@ export function computeOverviewStats(views: TaskView[], now: Date): OverviewStat
 
     // —— 未安排积压：停靠日缺失兜底 createdAt 日期 ——
     if (v.status === "unscheduled") {
-      const parkedKey = v.parkedDate ?? toDateKey(new Date(v.createdAt));
+      const parkedKey = firstScheduledDay(v) ?? v.parkedDate ?? toDateKey(new Date(v.createdAt));
       const parkedDays = differenceInCalendarDays(fromDateKey(today), fromDateKey(parkedKey));
       if (parkedDays >= STALE_UNSCHEDULED_MIN_DAYS) staleUnscheduledCount += 1;
     }

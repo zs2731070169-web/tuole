@@ -55,7 +55,23 @@ export function friendlyDate(key: string | null, lang: "zh-CN" | "en-US", now: D
   if (diff === 0) return lang === "zh-CN" ? "今天" : "Today";
   if (diff === 1) return lang === "zh-CN" ? "明天" : "Tomorrow";
   if (diff === -1) return lang === "zh-CN" ? "昨天" : "Yesterday";
-  return format(fromDateKey(key), "M月d日", { locale: localeObj(lang) });
+  return absoluteDateLabel(key, lang);
+}
+
+/** 绝对短日期：zh「10月10日」/ en「Oct 10」（月/日是字面量，勿用同一 pattern 套双语） */
+export function absoluteDateLabel(key: string, lang: "zh-CN" | "en-US"): string {
+  return lang === "zh-CN"
+    ? format(fromDateKey(key), "M月d日")
+    : format(fromDateKey(key), "MMM d", { locale: localeObj(lang) });
+}
+
+/** 工作台卡片的时间锚点（2026-10-09 用户反馈修正）：工作台可浏览任意选中日，卡片日期若按
+ *  真实今天输出「明天/昨天」会与视图框架错位（10月10日的工作台里，卡片写着「明天」指的
+ *  却是 10 号自己）。仅真实今天保留相对词，其余一律绝对日期；改期弹层等真实时间框架仍用 friendlyDate */
+export function workbenchDateLabel(key: string | null, lang: "zh-CN" | "en-US", now: Date = new Date()): string {
+  if (!key) return "";
+  if (key === todayKey(now)) return lang === "zh-CN" ? "今天" : "Today";
+  return absoluteDateLabel(key, lang);
 }
 
 // 日历月视图格子：固定 6 行（42 格），避免 5 周/月与 6 周/月切换时整页高度变化，

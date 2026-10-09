@@ -37,15 +37,74 @@ describe("loadUiState / saveUiState", () => {
   });
 });
 
+describe("loadTasks 字段归一", () => {
+  it("tags 缺失/坏形状归一为空数组，合法标签保留并去重切分", () => {
+    memoryStorage.set(
+      STORAGE_KEYS.tasks,
+      JSON.stringify([
+        demoTask, // 无 tags 字段（旧数据）
+        { ...demoTask, id: "bad", tags: "不是数组" },
+        { ...demoTask, id: "mixed", tags: ["工作", 42, "工作、生活"] },
+      ]),
+    );
+    const loaded = loadTasks();
+    expect(loaded[0].tags).toEqual([]);
+    expect(loaded[1].tags).toEqual([]);
+    expect(loaded[2].tags).toEqual(["工作", "生活"]);
+  });
+
+  it("已下线的 recurrence 字段仍被剥离", () => {
+    memoryStorage.set(STORAGE_KEYS.tasks, JSON.stringify([{ ...demoTask, recurrence: "daily" }]));
+    expect(loadTasks()[0]).not.toHaveProperty("recurrence");
+  });
+
+  it("group 缺失/非字符串/空白归一为 null，合法值 trim", () => {
+    memoryStorage.set(
+      STORAGE_KEYS.tasks,
+      JSON.stringify([
+        demoTask, // 无 group 字段（旧数据）
+        { ...demoTask, id: "bad", group: 42 },
+        { ...demoTask, id: "blank", group: "   " },
+        { ...demoTask, id: "ok", group: "  产品设计 " },
+      ]),
+    );
+    const loaded = loadTasks();
+    expect(loaded[0].group).toBeNull();
+    expect(loaded[1].group).toBeNull();
+    expect(loaded[2].group).toBeNull();
+    expect(loaded[3].group).toBe("产品设计");
+  });
+
+  it("旧 subtasks 键迁移为 todos 并剥离旧键；坏形状条目被剔除", () => {
+    // 2026-10-09 内部正名：存量数据/旧快照仍用 subtasks 键，载入时折转到 todos
+    const legacy = {
+      ...demoTask,
+      todos: undefined, // 旧数据没有 todos 键（有值时 ?? 不回退旧键）
+      subtasks: [
+        { id: "s1", title: "第一项", done: true },
+        { id: "s2", title: "第二项", done: false },
+        "junk", // 坏形状条目剔除
+      ],
+    };
+    memoryStorage.set(STORAGE_KEYS.tasks, JSON.stringify([legacy]));
+    const loaded = loadTasks()[0];
+    expect(loaded.todos.map(({ title, done }) => ({ title, done }))).toEqual([
+      { title: "第一项", done: true },
+      { title: "第二项", done: false },
+    ]);
+    expect(loaded).not.toHaveProperty("subtasks");
+  });
+});
+
 // ── 桌面文件后端（~/.tuole 分类 JSON）───────────────────────────────────────────
 const demoTask: Task = {
   id: "t1",
   title: "旧版任务",
   note: "",
   priority: "none",
-  scheduledDate: "2026-10-01",
-  dueDate: null,
-  subtasks: [],
+  scheduledDates: ["2026-10-01"],todos: [],
+  tags: [],
+  group: null,
   createdAt: "2026-10-01T08:00:00.000Z",
   completedAt: null,
   completedReason: null,

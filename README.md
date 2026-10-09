@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-F59E0B?style=flat-square" alt="version 1.0.0">
+  <img src="https://img.shields.io/badge/version-1.1.0-F59E0B?style=flat-square" alt="version 1.1.0">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Web-4B5563?style=flat-square" alt="platform macOS and Web">
   <img src="https://img.shields.io/badge/data-100%25%20local%20%26%20offline-0891B2?style=flat-square" alt="data 100 percent local and offline">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square" alt="license MIT"></a>
@@ -59,7 +59,7 @@ pnpm install
 ## Quick Start
 
 1. Open the app — you land on **Overview**.
-2. Switch to **Workbench**, click **New task**, type a title (required, marked with a red asterisk), and save. The task appears as *Unscheduled*.
+2. Switch to **Workbench**, click **New task**, type a title (required, marked with a red asterisk), optionally add **tags** or **to-dos**, and save. The task appears as *Unscheduled*.
 3. Click **Schedule** on the task row to park it on the selected day — the moment its date arrives, the **Done** button appears automatically.
 4. Miss a date? The task turns red as *Overdue* and stays until you reschedule it or mark it done.
 
@@ -102,7 +102,7 @@ Nothing leaves the machine: no account, no sync, no telemetry.
 
 - **Auto backup**: optional, interval from 5 minutes to once a day, last 10 snapshots kept; produces nothing when there are no tasks
 - **Restore**: from any snapshot in Settings, or from an exported JSON backup file; a recovery point is saved before any replace
-- **Excel**: export to xlsx (tasks and subtasks sheets), import with merge or full-replace modes
+- **Excel**: export to xlsx (tasks and to-dos sheets, tags included on the task sheet), import with merge or full-replace modes
 
 ## Preferences
 

@@ -83,8 +83,8 @@ describe("scheduler 生命周期", () => {
 });
 
 describe("checkReminders 触发口径（投递层已 mock，无 Notification 权限也必须投递）", () => {
-  const mkTask = (id: string, title: string, scheduledDate: string | null) => ({
-    id, title, note: "", priority: "none", scheduledDate, dueDate: null, subtasks: [],
+  const mkTask = (id: string, title: string, day: string | null) => ({
+    id, title, note: "", priority: "none", scheduledDates: day ? [day] : [], todos: [], tags: [], group: null,
     createdAt: "2026-10-01T00:00:00Z", completedAt: null, completedReason: null, sortOrder: 0,
   });
 

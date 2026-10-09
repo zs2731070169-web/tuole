@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-F59E0B?style=flat-square" alt="版本 1.0.0">
+  <img src="https://img.shields.io/badge/version-1.1.0-F59E0B?style=flat-square" alt="版本 1.1.0">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Web-4B5563?style=flat-square" alt="平台 macOS 与 Web">
   <img src="https://img.shields.io/badge/data-100%25%20local%20%26%20offline-0891B2?style=flat-square" alt="数据 100% 本地离线">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square" alt="许可证 MIT"></a>
@@ -59,7 +59,7 @@ pnpm install
 ## 快速上手
 
 1. 打开应用，落在**概览**视图。
-2. 切到**工作台**，点**新建任务**，填标题（必填，标签带红色星号）后保存——任务以「未安排」状态出现。
+2. 切到**工作台**，点**新建任务**，填标题（必填，字段带红色星号）后保存——可顺便打**标签**、加**待办项**；任务以「未安排」状态出现。
 3. 点任务行内的**安排**把它排到选中日；日期一到，**完成**按钮自动出现。
 4. 错过了日期？任务变红成为「逾期」，一直保留，直到你改期或完成它。
 
@@ -102,7 +102,7 @@ pnpm install
 
 - **自动备份**：可选开启，间隔从 5 分钟到每天一次，滚动保留最近 10 份；没有任何任务时不产生备份
 - **恢复**：从设置里的任意快照恢复，或从导出的 JSON 备份文件恢复；任何替换操作前自动保存恢复点
-- **Excel**：导出 xlsx（任务与子任务两张表）；导入支持合并与整体替换两种模式
+- **Excel**：导出 xlsx（任务与待办项两张表，任务表含标签列）；导入支持合并与整体替换两种模式
 
 ## 个性化
 

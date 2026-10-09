@@ -12,10 +12,19 @@ export type CompletedReason = "manual" | "dragged" | null;
 
 export type Priority = "high" | "medium" | "low" | "none";
 
-export interface Subtask {
+export interface Todo {
   id: string;
   title: string;
   done: boolean;
+}
+
+/** 待办项数组归一：非数组 → []；剔除无字符串标题的坏条目。
+ *  旧键折转（2026-10-09 正名迁移）由 storage.ts 的迁移单点处理后传入 */
+export function normalizeTodoItems(value: unknown): Todo[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Todo => !!item && typeof item === "object" && typeof (item as Todo).title === "string",
+  );
 }
 
 export interface Task {
@@ -23,9 +32,13 @@ export interface Task {
   title: string;
   note: string;
   priority: Priority;
-  scheduledDate: string | null; // 执行期起始日 'YYYY-MM-DD'，null 表示未安排
-  dueDate: string | null; // 可选执行期结束日（含当天）；null 表示单日任务
-  subtasks: Subtask[];
+  tags: string[]; // 标签（2026-10 新增）：自由多值标注、纯展示性元数据，不参与状态机/筛选/搜索/统计口径
+  group: string | null; // 分组（2026-10-09 新增）：单值互斥归类——日历同组同色成块识别；null = 无分组不着色
+  scheduledDates: string[]; // 任务所属日期：排序去重、可分散；日期与生命周期状态独立
+  // 「安排」动作的持久化标记。null = 未安排；有值 = 已开始，再结合日期派生 upcoming/today/overdue。
+  // undefined 只用于兼容迁移前数据（有日期视为已开始）；storage 载入后会收敛为显式值。
+  startedAt?: string | null;
+  todos: Todo[];
   createdAt: string; // ISO
   // 最近一次用户侧创建/编辑落库时刻（ISO，可选兼容历史数据）：当天提醒时刻之后改动的任务
   // 当天不进到期提醒（保存反馈由顶部 toast 承担，紧随的提醒弹窗构成双弹打扰）——见 reminder.cjs

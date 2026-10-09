@@ -85,33 +85,56 @@ export function ViewToolbar({ className, leading, trailing, onRefresh }: Props) 
 
 // 共用「新建」入口（draft 标记——未点「保存」前任何列表/日历格/计数不渲染）。
 // 统一口径：创建「未安排草稿」停靠在所属日（未安排与进行中一样跟着日期走、按日隔离）——
-// 工作台停靠选中日、日历停靠选中格、概览无新建入口（纯查看）；过去日期一律回退今天。
-// 保存后进入该日「未安排」栏；正式开展走「安排」/拖入「进行中」。仅工作台/日历渲染本按钮
+// 工作台停靠选中日、日历停靠选中格、概览无新建入口（纯查看）。
+// **日历选中今天之前的格子 = 按钮整体禁用（2026-10-10 用户决策：过去日仅查看，不允许新建；
+// 该场景废弃「回退今天」的静默换目标——灰化 + 悬停说明比悄悄改天更可预期）**。工作台则始终
+// 精确使用当前选中日（含过去日）。保存后进入该日「未安排」栏；
+// 正式开展走「安排」/拖入「进行中」。仅工作台/日历渲染本按钮
 function NewTaskButton() {
   const lang = useSettingsStore((s) => s.settings.language);
   const view = useUiStore((s) => s.view);
   const openEditor = useUiStore((s) => s.openEditor);
+  const calendarSelectedDay = useCalendarStore((s) => s.selectedDay);
+  // 禁用判定订阅实时选中格（非原生 disabled：title 悬停说明依赖元素可命中指针事件）
+  const pastDayPicked =
+    view === "calendar" && !!calendarSelectedDay && calendarSelectedDay < todayKey();
 
   const onClick = () => {
+    if (pastDayPicked) return;
     const today = todayKey();
     let day = today;
     if (view === "workbench") {
-      const picked = useUiStore.getState().workbenchDay;
-      day = picked < today ? today : picked;
+      day = useUiStore.getState().workbenchDay;
     } else if (view === "calendar") {
       const picked = useCalendarStore.getState().selectedDay;
-      day = !picked || picked < today ? today : picked;
+      // 点击时点复核过去日（最后防线）：pastDayPicked 是渲染帧快照（todayKey() 渲染期求值），
+      // 应用跨午夜静置无任何 store 写入 → 不重渲染 → 闭包里的判定停留在昨天——「昨天的今天」
+      // 会从这里漏过去停靠成过去日草稿。用点击时刻的新鲜 today 现算拦截
+      if (picked != null && picked < today) return;
+      day = picked ?? today;
     }
-    const draft = useTaskStore.getState().createTask({ title: "", draft: true, parkedDate: day });
+    const draft = useTaskStore.getState().createTask({
+      title: "",
+      draft: true,
+      scheduledDates: [day],
+      startedAt: null,
+      parkedDate: null,
+    });
     openEditor(draft.id);
   };
 
   return (
     <button
       onClick={onClick}
-      aria-label={lang === "zh-CN" ? "新建任务" : "New task"}
-      title={lang === "zh-CN" ? "新建任务" : "New task"}
-      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[13px] font-medium text-foreground transition-colors hover:bg-muted active:scale-95"
+      aria-disabled={pastDayPicked || undefined}
+      // 禁用态把原因并入 aria-label：title 读屏默认不播报、键盘聚焦也不显示气泡，
+      // 悬停说明只覆盖鼠标通道（2026-10-10 审查修复）
+      aria-label={pastDayPicked ? `${t("action.new", lang)}，${t("action.newPastDay", lang)}` : t("action.new", lang)}
+      title={pastDayPicked ? t("action.newPastDay", lang) : t("action.new", lang)}
+      className={cn(
+        "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[13px] font-medium text-foreground transition-colors",
+        pastDayPicked ? "cursor-not-allowed opacity-40" : "hover:bg-muted active:scale-95",
+      )}
     >
       <Plus className="size-4" />
       <span className="hidden sm:inline">{lang === "zh-CN" ? "新建" : "New"}</span>

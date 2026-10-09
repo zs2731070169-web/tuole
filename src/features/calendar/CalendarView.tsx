@@ -1,19 +1,28 @@
 // 日历视图：仅月视图（周视图已下线）；每个日期格既是「放置容器」（拖入即改期）也是「跳转入口」——
 // 两段式：第一次点击仅选中高亮；再次点击已选中的格子（或其中任务 chip）跳转到工作台查看该天。
 // 格内零弹窗（点任务不弹编辑抽屉）；新建走 ViewToolbar 的共用「新建」按钮（排到选中格/今天）。
+// 单任务删除 = chip 与「+N 更多」浮层条目行尾 hover 显现的 🗑（2026-10-10 用户需求：单删不必
+// 进「按日期删除」三步模式，指到哪个删哪个；确认走 ConfirmDialog。**多天任务只修剪被点的那一
+// 天**——deleteTaskDay 与「按日期删除」同源语义，其余日期保留；单日/停靠/已完成才整条删除）。
+// **今天之前的格子仅查看（2026-10-10 用户决策，同日二次收紧）**：可选中、可悬停看清单、
+// 删除模式照常选日、单任务删除照常（清理历史是合法动作）；但任何点击路径都不跳工作台、
+// 不作为新建目标（新建按钮随之禁用），也不接收拖放——移动与 ⌥ 复制粘贴都不得落到过去格
+// （no-drop 反馈，同「拖到自己执行期内」）。
 // 状态用颜色区分；无任何改状态操作
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { addMonths, format, isSameDay, isSameMonth } from "date-fns";
 import { zhCN, enUS } from "date-fns/locale";
-import { CalendarDays, Check, LocateFixed, MoreHorizontal, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, Copy, LocateFixed, MoreHorizontal, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/popover";
 import type { TaskView } from "../../shared/types";
-import { monthCarouselWindow, monthGrid, toDateKey, todayKey } from "../../lib/date";
+import { absoluteDateLabel, monthCarouselWindow, monthGrid, toDateKey, todayKey } from "../../lib/date";
 import { t } from "../../lib/i18n";
-import { taskIdsOnScheduledDays, unscheduledTaskIdsParkedOnDays } from "../../shared/calendar";
-import { calendarTaskOnDay } from "../../shared/taskDates";
+import { planDeleteDaysPrune } from "../../shared/calendar";
+import { calendarTaskOnDay, scheduledOnDay } from "../../shared/taskDates";
+import { groupToneClass } from "../../shared/groups";
+
 import { useTaskStore } from "../../stores/useTaskStore";
 import { useUiStore } from "../../stores/useUiStore";
 import { useCalendarStore } from "../../stores/useCalendarStore";
@@ -50,30 +59,26 @@ export function CalendarLeadingBar() {
   const startDeleteMode = useCalendarStore((s) => s.startDeleteMode);
   const cancelDeleteMode = useCalendarStore((s) => s.cancelDeleteMode);
   const tasks = useTaskStore((s) => s.tasks);
-  const deleteTasks = useTaskStore((s) => s.deleteTasks);
+  const deleteDaysFromTasks = useTaskStore((s) => s.deleteDaysFromTasks);
   const locale = lang === "zh-CN" ? zhCN : enUS;
-  // 删除范围 = 所选日期格内的**全部**任务（2026-10 用户决策：删除模式下未安排任务也进
-  // 停靠日格显示，「未安排 N」补充开关废弃）——执行期覆盖该日的任务 + 停靠在该日的未安排
-  //（parkedDate 缺失兜底今天），选中格子即连带删除，不再需要单独开关
-  const dayTaskIds = useMemo(() => taskIdsOnScheduledDays(tasks, deleteDays), [tasks, deleteDays]);
-  const parkedUnscheduledIds = useMemo(
-    () => unscheduledTaskIdsParkedOnDays(tasks, deleteDays, todayKey()),
+  // 删除范围（2026-10-10 用户决策：**删一天只移除那一天**，与拖拽逐日移动同模型）：
+  // 多天任务 = 从执行期修剪所选日（任务保留）；执行期全部命中 / 停靠在该日的未安排 /
+  // 完成日在所选日的已完成 = 整条删除。规划见 shared/calendar.planDeleteDaysPrune
+  const prunePlan = useMemo(
+    () => planDeleteDaysPrune(tasks, deleteDays, todayKey()),
     [tasks, deleteDays],
   );
-  const taskIds = useMemo(
-    () => [...dayTaskIds, ...parkedUnscheduledIds],
-    [dayTaskIds, parkedUnscheduledIds],
-  );
+  const affectedCount = prunePlan.deleteIds.length + prunePlan.prunes.length;
 
   const confirmDelete = async () => {
-    if (taskIds.length === 0) return;
-    // 确认文案单口径：N 天 · M 项任务（M 已含停靠在该日的未安排）
+    if (affectedCount === 0) return;
+    // 确认文案单口径：N 天 · M 项任务（M = 整条删除 + 修剪影响的多天任务，已含停靠未安排）
     const message = t("confirm.deleteCalendarDays", lang)
       .replace("{days}", String(deleteDays.length))
-      .replace("{tasks}", String(taskIds.length));
+      .replace("{tasks}", String(affectedCount));
     const confirmed = await useConfirmStore.getState().ask(message);
     if (!confirmed) return;
-    deleteTasks(taskIds);
+    deleteDaysFromTasks(deleteDays);
     useUiStore.getState().clearSelection();
     cancelDeleteMode();
   };
@@ -103,13 +108,13 @@ export function CalendarLeadingBar() {
             title={deleteDays.length === 0 ? t("calendar.deleteHint", lang) : undefined}
             className={cn(
               "inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg px-2.5 text-[12px] font-medium tabular-nums",
-              taskIds.length > 0 ? "bg-muted text-foreground" : "bg-muted text-muted-foreground",
+              affectedCount > 0 ? "bg-muted text-foreground" : "bg-muted text-muted-foreground",
             )}
           >
             {deleteDays.length > 0
               ? t("calendar.deleteSelection", lang)
                   .replace("{days}", String(deleteDays.length))
-                  .replace("{tasks}", String(taskIds.length))
+                  .replace("{tasks}", String(affectedCount))
               : t("calendar.deleteHintShort", lang)}
           </span>
           {/* 「未安排 N」补充范围开关已删除（2026-10 用户决策）：未安排任务进停靠日格显示，
@@ -127,8 +132,8 @@ export function CalendarLeadingBar() {
             <button
               type="button"
               onClick={confirmDelete}
-              disabled={taskIds.length === 0}
-              title={deleteDays.length > 0 && taskIds.length === 0 ? t("calendar.deleteEmpty", lang) : undefined}
+              disabled={affectedCount === 0}
+              title={deleteDays.length > 0 && affectedCount === 0 ? t("calendar.deleteEmpty", lang) : undefined}
               className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-status-overdue/40 bg-status-overdue/10 px-2.5 text-[13px] font-medium text-status-overdue transition-colors hover:bg-status-overdue/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
             >
               <Trash2 className="size-4" />
@@ -198,8 +203,18 @@ export function CalendarActionsMenu() {
 export function CalendarView({ views }: { views: TaskView[] }) {
   const lang = useSettingsStore((s) => s.settings.language);
   const locale = lang === "zh-CN" ? zhCN : enUS;
+  const moveTaskDay = useTaskStore((s) => s.moveTaskDay);
+  // 未安排任务的 chip 拖到某格 = 安排到那天（AGENTS.md 未安排任务的排期路径之一：拖拽（日历格））
   const scheduleTo = useTaskStore((s) => s.scheduleTo);
   const tasks = useTaskStore((s) => s.tasks);
+  // 日清单浮层行「复制」（2026-10-10 用户决策）：原地整条克隆，归位走既有拖拽——
+  // 克隆是全字段等价副本，拖源或拖副本终态任务集合相同，不存在「拖错」
+  const duplicateTask = useTaskStore((s) => s.duplicateTask);
+  // ⌥(Alt)+拖 chip = 复制（同日决策的单手势路径）：克隆整条 + 锚定被拖日整体平移落位
+  const duplicateTaskToDay = useTaskStore((s) => s.duplicateTaskToDay);
+  // 单任务删除（2026-10-10 用户需求：删一个任务不必进「按日期删除」三步模式——chip 与浮层
+  // 条目直接给删除入口，指到哪个删哪个）；多天任务走 deleteTaskDay 只修剪被点的那一天
+  const deleteTaskDay = useTaskStore((s) => s.deleteTaskDay);
   // 点任务 chip / 再点已选中格 = 跳工作台查看该天（returnView 记录来源，工作台可「返回日历」）
   const openDayInWorkbench = useUiStore((s) => s.openDayInWorkbench);
   const clearSelection = useUiStore((s) => s.clearSelection);
@@ -222,6 +237,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   const rangeSelectDeleteDay = useCalendarStore((s) => s.rangeSelectDeleteDay);
   const addDeleteDayRangeFromAnchor = useCalendarStore((s) => s.addDeleteDayRangeFromAnchor);
   const cancelDeleteMode = useCalendarStore((s) => s.cancelDeleteMode);
+  // 拖拽中的任务 id（dragover 阶段读不到 dataTransfer，与 WorkbenchView 同款通道）：
+  // 日历拖拽落点合法性判定要用它的执行期（拖到自己覆盖期内 = 无效放置，见 isDropOnOwnSpan）
+  const draggingTaskId = useUiStore((s) => s.draggingTaskId);
   // 「+N 更多」浮层日清单当前打开的日期格（同屏最多一格）：任务多于上限时**悬停入口**弹出只读
   // 完整列表（2026-10 用户决策：由点击改为鼠标经过自动弹出）；移走经宽限定时器自动关闭，
   // Esc/点外部由 Radix onOpenChange 兜底，同屏互斥由函数式 set 保护
@@ -236,6 +254,10 @@ export function CalendarView({ views }: { views: TaskView[] }) {
     }
   };
   const scheduleDayListClose = (key: string) => {
+    // 任务 chip 拖拽中不关浮层：dragstart 会在源元素上触发 mouseleave，若 240ms 后浮层
+    // 卸载，dragend 不再派发到已卸载元素、拖拽态只能靠 drop 目标侧兜底（2026-10-09
+    // 浮层条目开放拖拽的配套防御）
+    if (useUiStore.getState().draggingTaskId) return;
     cancelDayListClose();
     dayListCloseTimer.current = window.setTimeout(() => {
       dayListCloseTimer.current = null;
@@ -244,12 +266,53 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   };
   // 组件卸载（含视图切换）时清掉挂着的关闭定时器
   useEffect(() => () => cancelDayListClose(), []);
+
+  // 任务 chip 的拖拽武装（2026-10-09 用户需求：格内 chip 与「+N 更多」浮层条目可拖到任意
+  // 日历格快速迁移）。静息 draggable=false、按下才武装（Chromium 常驻 draggable 会反复进入
+  // 原生拖拽候选态闪光标——TaskItem 同款教训），pointerup/cancel/dragend 复位；dragstart 写入
+  // 与 TaskItem 相同的拖拽载荷（text/task-id + draggingStatus/draggingTaskId），格子既有的
+  // onDrop 契约（清拖拽态不变，落库改走 rescheduleSpanToDay）复用。删除模式不武装（chip 点击 = 选日）
+  const chipDragProps = (task: TaskView, sourceDay: string) => ({
+    "data-calendar-chip": "" as const,
+    draggable: false,
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      if (deleteMode) return;
+      e.currentTarget.draggable = true;
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
+      e.currentTarget.draggable = false;
+    },
+    onPointerCancel: (e: React.PointerEvent<HTMLElement>) => {
+      e.currentTarget.draggable = false;
+    },
+    onDragStart: (e: React.DragEvent<HTMLElement>) => {
+      e.dataTransfer.setData("text/task-id", task.id);
+      // 源日随载荷传递：drop 侧「只动被拖那一天」需要知道挪的是哪一天（2026-10-09 模型改造）
+      e.dataTransfer.setData("text/task-source-day", sourceDay);
+      // copyMove 而非 move：⌥(Alt)+拖 = 复制（2026-10-10 用户决策）——dragover 需要被允许
+      // 设 dropEffect="copy"，系统光标才会显示复制「+」角标；是否按 ⌥ 在 drop 时刻判定
+      e.dataTransfer.effectAllowed = "copyMove";
+      useUiStore.getState().setDraggingStatus(task.status);
+      useUiStore.getState().setDraggingTaskId(task.id);
+    },
+    onDragEnd: (e: React.DragEvent<HTMLElement>) => {
+      // 兜底清拖拽态（drop 目标侧也会显式清）；拖拽后鼠标不在浮层内、mouseleave 定时器
+      // 不会自然触发，这里顺带收起「+N 更多」浮层
+      e.currentTarget.draggable = false;
+      useUiStore.getState().setDraggingStatus(null);
+      useUiStore.getState().setDraggingTaskId(null);
+      setDayListDay(null);
+    },
+  });
   const deleteDaySet = useMemo(() => new Set(deleteDays), [deleteDays]);
   const carousel = useMemo(() => monthCarouselWindow(anchor), [anchor]);
   const visibleDays = useMemo(() => carousel.days.map(toDateKey), [carousel]);
   const currentDaySet = useMemo(() => new Set(monthGrid(anchor).map(toDateKey)), [anchor]);
   const currentOffset = carousel.currentRow * CALENDAR_ROW_STEP;
   const nextOffset = carousel.nextRow * CALENDAR_ROW_STEP;
+  // 过去日语义锚点：YYYY-MM-DD 键字典序即日期序，key < today 即「今天之前」（仅查看约束，
+  // 见文件头注释；每渲染帧取值，跨午夜与 isToday 的时效口径一致）
+  const today = todayKey();
   const allTaskCountByDay = useMemo(() => {
     const counts = new Map<string, number>();
     for (const task of tasks) {
@@ -283,6 +346,28 @@ export function CalendarView({ views }: { views: TaskView[] }) {
     else selectDeleteDay(key);
   };
 
+  // 单任务删除：确认必须经 useConfirmStore.ask 的应用内 AlertDialog，禁止 window.confirm/
+  // 绕过确认；删除后把该 id 从 selectedIds 移除（跨视图遗留的工作台选中集不得指向已删任务）。
+  // **多天任务 = 只删被点的那一天**（2026-10-10 用户实测反馈：29/30 是同一条任务，点 29 号
+  // 整条删除把 30 号也带走了）——planDeleteDaysPrune 单任务×单日与「按日期删除」同源：多天
+  // 覆盖该日 → 修剪（任务与其余日期保留，确认文案明示）；单日/未安排停靠/已完成完成日 → 整条
+  // 删除。**今天之前的格子照常可删**：过去日「仅查看」约束封的是跳转/新建/落放，删除是合法的
+  // 历史清理动作（本需求的主场景正是清理过去日任务）
+  const deleteCalendarTask = async (task: TaskView, day: string) => {
+    const fallbackTitle = lang === "zh-CN" ? "未命名任务" : "Untitled";
+    const title = task.title || fallbackTitle;
+    const prune = planDeleteDaysPrune([task], [day], today).prunes.find((entry) => entry.id === task.id);
+    const message = prune
+      ? t("confirm.removeTaskDay", lang)
+          .replace("{title}", title)
+          .replace("{date}", absoluteDateLabel(day, lang))
+      : t("confirm.deleteTask", lang).replace("{title}", title);
+    const ok = await useConfirmStore.getState().ask(message);
+    if (!ok) return;
+    deleteTaskDay(task.id, day);
+    useUiStore.setState((s) => ({ selectedIds: s.selectedIds.filter((x) => x !== task.id) }));
+  };
+
   // 锚点变化后在绘制前复位：新旧轨道在当前视窗显示同一组日期，无闪烁跳帧。
   useLayoutEffect(() => {
     const track = trackRef.current;
@@ -301,6 +386,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
 
   const onGridPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isInsideFloatingLayer(e.target)) return;
+    // 任务 chip 上的按下不进入轮播跟踪：chip 拖拽（HTML5）与拖月导航互斥——否则拖 chip
+    // 会同时平移轨道、把随后的 click 吞掉（2026-10-09 chip 开放拖拽的配套豁免，勿删）
+    if (e.target instanceof Element && e.target.closest("[data-calendar-chip]")) return;
     if (e.button !== 0 || dragNav.current.animating) return;
     // 每次按下都清掉上一手势的「拖拽后吞 click」痕迹：pointercancel 结束的手势没有后续 click
     // 来消费 moved，残留标记会把本次（可能是选择/连选轻点）的 click 误吞
@@ -346,6 +434,22 @@ export function CalendarView({ views }: { views: TaskView[] }) {
     onGridDragEnd();
   };
 
+  // 滑到相邻月份（拖拽松手越过阈值与滚轮切月共用的动画原语）：
+  // 轨道先动到相邻块位置，260ms 后换锚点、复位 effect 瞬移回中位（无缝衔接）
+  const slideToMonth = (dir: 1 | -1) => {
+    const track = trackRef.current;
+    if (!track || dragNav.current.animating) return;
+    dragNav.current.animating = true;
+    setDayListDay(null);
+    track.style.transition = "transform 260ms ease-out";
+    track.style.pointerEvents = "none";
+    track.style.transform = `translateY(${dir === 1 ? -nextOffset : 0}px)`;
+    window.setTimeout(() => {
+      const { anchor: a, setAnchor: setA } = useCalendarStore.getState();
+      setA(addMonths(a, dir));
+    }, 260);
+  };
+
   const onGridDragEnd = () => {
     const d = dragNav.current;
     if (!d.down || !trackRef.current) return;
@@ -355,19 +459,58 @@ export function CalendarView({ views }: { views: TaskView[] }) {
     track.style.transition = "transform 260ms ease-out";
     if (d.dy <= -threshold || d.dy >= threshold) {
       // 越过阈值：滑到相邻月份的起始周，日期不会在接缝处重复。
-      const dir = d.dy < 0 ? 1 : -1;
-      d.animating = true;
-      track.style.pointerEvents = "none";
-      track.style.transform = `translateY(${dir === 1 ? -nextOffset : 0}px)`;
-      window.setTimeout(() => {
-        const { anchor: a, setAnchor: setA } = useCalendarStore.getState();
-        setA(addMonths(a, dir));
-      }, 260);
+      slideToMonth(d.dy < 0 ? 1 : -1);
     } else {
       // 未达阈值：弹回当前月份。
       track.style.transform = `translateY(${-currentOffset}px)`;
     }
   };
+
+  // ── 滚轮切月（2026-10-10 用户需求：鼠标滚轮上下滑切换月份）───────────────────────
+  // React 合成 wheel 在根上是 passive 监听、preventDefault 会失效，改挂原生非 passive 监听。
+  // 触发条件 = 累计 deltaY 越过阈值（鼠标滚轮一格即可、触控板轻扫需累积）+ 冷却窗口
+  // （一次手势只切一月，连续滚动不连切）；浮层（+N 更多弹窗）与格内滚动区优先于切月
+  const gridViewportRef = useRef<HTMLDivElement | null>(null);
+  const wheelGesture = useRef({ sum: 0, lastAt: 0, lastTriggerAt: 0 });
+  const WHEEL_TRIGGER_DELTA = 60;
+  const WHEEL_COOLDOWN_MS = 450;
+  const WHEEL_GESTURE_RESET_MS = 300;
+  // ref 转发让空依赖 effect 始终调用「最新渲染」的 slideToMonth（轨道几何随锚点变化）
+  const slideToMonthRef = useRef(slideToMonth);
+  slideToMonthRef.current = slideToMonth;
+
+  useEffect(() => {
+    const viewport = gridViewportRef.current;
+    if (!viewport) return;
+    const onWheel = (e: WheelEvent) => {
+      // 「+N 更多」浮层内的滚轮归浮层自身（列表滚动），不切月
+      if (e.target instanceof Element && e.target.closest("[data-radix-popper-content-wrapper]")) return;
+      // 格内滚动区还能继续滚时让格子滚（溢出场景少，勿劫持；到边界后顺势切月）
+      const cellScroll = e.target instanceof Element ? e.target.closest(".calendar-cell-scroll") : null;
+      if (cellScroll instanceof HTMLElement && cellScroll.scrollHeight > cellScroll.clientHeight + 1) {
+        const atTop = cellScroll.scrollTop <= 0;
+        const atBottom = cellScroll.scrollTop + cellScroll.clientHeight >= cellScroll.scrollHeight - 1;
+        if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) return;
+      }
+      // 拖拽手势进行中/上一轮滑动动画未完：忽略，避免与拖月导航打架
+      if (dragNav.current.down || dragNav.current.animating) return;
+      e.preventDefault();
+      const gesture = wheelGesture.current;
+      const now = Date.now();
+      // 手势间隔超时重新累计（触控板余波不应继续累计切月）
+      if (now - gesture.lastAt > WHEEL_GESTURE_RESET_MS) gesture.sum = 0;
+      gesture.lastAt = now;
+      // 冷却窗口内只累计不触发
+      if (now - gesture.lastTriggerAt < WHEEL_COOLDOWN_MS) return;
+      gesture.sum += e.deltaY;
+      if (Math.abs(gesture.sum) < WHEEL_TRIGGER_DELTA) return;
+      slideToMonthRef.current(gesture.sum > 0 ? 1 : -1);
+      gesture.sum = 0;
+      gesture.lastTriggerAt = now;
+    };
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, []);
 
   const onGridClickCapture = (e: React.MouseEvent) => {
     if (isInsideFloatingLayer(e.target)) return;
@@ -378,14 +521,21 @@ export function CalendarView({ views }: { views: TaskView[] }) {
     }
   };
 
+  // 拖拽落点合法性：拖拽中的任务若已覆盖目标日（多天任务的 chip 拖到自己执行期内的
+  // 某一天）= 无效放置——否则 scheduleTo 会把整段跨度平移到该天，表现为「同一天重复
+  // 放了任务、其他格子里的同名任务被改动」（2026-10-09 用户反馈两个 bug 的同根因）。
+  // 无效反馈与既有契约一致：dragover 不高亮、drop 不生效；落到期外 = 整段刚性平移
+  const draggedTask = draggingTaskId ? views.find((v) => v.id === draggingTaskId) : undefined;
+  const isDropOnOwnSpan = (dayKey: string) => !!draggedTask && scheduledOnDay(draggedTask, dayKey);
+
   const byDay = new Map<string, TaskView[]>();
-  // 活动任务覆盖执行期内每一天；已完成任务只进完成日格。
-  // 未安排任务进「停靠日」格（未安排与进行中一样跟着日期走、按日隔离；parkedDate 缺失兜底今天），
+  // 任务日期与生命周期独立：未安排任务同样直接按 scheduledDates 进格。
+  // 旧数据的空集合仍用 parkedDate 防御兜底，正常载入后 storage 会补成单日集合。
   // 这是日历里未安排任务的唯一可见入口（下方托盘已下线）。删除模式下**同样进格**
   //（2026-10 用户决策：选格删除连带停靠在该日的未安排一起删，「未安排 N」补充开关已废弃——
   // 删除范围口径见 CalendarLeadingBar 的 taskIds 组合，与格内显示同源不再有不一致）
   for (const t of views) {
-    if (!t.scheduledDate && t.status !== "done") {
+    if (t.scheduledDates.length === 0 && t.status !== "done") {
       if (t.status === "unscheduled") {
         const parkKey = t.parkedDate ?? toDateKey(new Date());
         if (!byDay.has(parkKey)) byDay.set(parkKey, []);
@@ -427,6 +577,7 @@ export function CalendarView({ views }: { views: TaskView[] }) {
 
       {/* 固定 6 行视口在一条连续周轨道上移动；日期只渲染一次，月份之间不会复制周。 */}
       <div
+        ref={gridViewportRef}
         onPointerDown={onGridPointerDown}
         onPointerMove={onGridPointerMove}
         onPointerUp={onGridPointerUp}
@@ -484,6 +635,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   return;
                 }
                 if (dayListWasOpen) return; // 这一下只用于收起本格浮层，不触发跳转
+                // 今天之前的格子仅查看：第一下选中保留（选中是查看视角），第二下不跳工作台
+                if (key < today) return;
                 // 再次点击已选中的格子 = 跳工作台查看该天。
                 // 原「再点新建任务 + 弹编辑抽屉」已按需求完全下线——日历不再弹出任何编辑弹窗
                 openDayInWorkbench(key);
@@ -506,14 +659,20 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   : undefined
               }
               onDragOver={(e) => {
-                if (deleteMode || !interactiveDay) return;
+                // 今天之前的格子不接收放置（2026-10-10 用户决策：移动与 ⌥ 复制粘贴都不得落到
+                // 过去日）——不 preventDefault = 无悬停高亮、系统 no-drop 光标，与「拖到自己
+                // 执行期内」的无效反馈同款契约
+                if (deleteMode || !interactiveDay || key < today || isDropOnOwnSpan(key)) return;
                 e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
+                // ⌥ 按下 = 复制（系统光标带「+」角标），否则移动；修饰键按压会持续触发
+                // dragover，角标随按放实时切换
+                e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
                 if (overDay !== key) setOverDay(key);
               }}
               onDragLeave={() => setOverDay(null)}
               onDrop={(e) => {
-                if (deleteMode || !interactiveDay) return;
+                // 同 onDragOver：过去日整格拒绝（移动 / ⌥ 复制粘贴均无效）
+                if (deleteMode || !interactiveDay || key < today || isDropOnOwnSpan(key)) return;
                 e.preventDefault();
                 setOverDay(null);
                 // drop 落定即清拖拽态：任务换格后源卡片/源 chip 随之卸载，dragend 不再派发
@@ -522,7 +681,19 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                 useUiStore.getState().setDraggingStatus(null);
                 useUiStore.getState().setDraggingTaskId(null);
                 const id = e.dataTransfer.getData("text/task-id");
-                if (id) scheduleTo(id, key); // 拖入某天 = 排期到该天
+                const sourceDay = e.dataTransfer.getData("text/task-source-day");
+                if (!id || !sourceDay) return; // 源日缺失属异常拖拽，防御性跳过
+                if (e.altKey) {
+                  // ⌥+拖 = 复制（2026-10-10 用户决策，Finder 同款）：单日副本——克隆任务
+                  // 内容、副本只落目标日一天（逐日语义，与移动/删除一致；源任务零改动）
+                  duplicateTaskToDay(id, key);
+                } else if (useTaskStore.getState().tasks.find((task) => task.id === id)?.scheduledDates.length === 0) {
+                  // 仅兼容迁移前的空日期数据：补到目标日，但不改「未安排」状态。
+                  scheduleTo(id, key);
+                } else {
+                  // 拖入某天 = 只把「源日那一天」挪到该天，其余日期零改动（2026-10-09 用户定调，movedDay）
+                  moveTaskDay(id, sourceDay, key);
+                }
               }}
               className={cn(
                 "relative flex h-[92px] min-h-0 flex-col overflow-hidden rounded-xl border p-1.5 transition-colors",
@@ -545,45 +716,75 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                 {format(day, "d")}
               </div>
               <div className="calendar-cell-scroll min-h-0 flex-1 space-y-1">
-                {chips.slice(0, MAX_CHIPS).map((t) => (
-                  // 点任务 chip = 跳到工作台查看/操作该任务（不弹编辑抽屉）。
+                {chips.slice(0, MAX_CHIPS).map((task) => (
+                  // chip 行 = group/chip 容器（chipDragProps 挂容器，2026-10-10 与浮层行同构）：
+                  // 标题按钮 + 行尾 hover 显现的单任务删除。chip 可拖拽到任意日历格迁移任务
+                  //（2026-10-09）；点标题 = 跳到工作台查看/操作该任务（不弹编辑抽屉）。
                   // 前提：所在格已被选中（未选中时这一下只选中本格，不跳转）。
                   // 跳转锚定日：活动任务锚定当前格日期；已结束任务锚定完成日——
                   // 工作台已完成栏按完成日分桶，锚安排日会看不到该任务。
                   // stopPropagation 避免触发日期格自身的两段式逻辑
-                  <button
-                    key={t.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // 同上：stopPropagation 后 Radix 延迟外部关闭失效，点其他格 chip 时显式收浮层。
-                      // 本格浮层正开着时，点 chip 与点格背景同一语义 = 只收起、不跳工作台
-                      //（2026-10 用户决策：打开「+N 更多」后点格内任务不要直接跳转——
-                      // 想跳走浮层里的条目或先收起再点）
-                      const dayListWasOpen = dayListDay === key;
-                      setDayListDay(null);
-                      if (deleteMode) {
-                        // 删除模式下点 chip = 点它所在的格，修饰键同格背景一致转发（同一格同一动词，
-                        // 勿绕开 Finder 选区模型走隐藏语义）
-                        dispatchDeleteDayPick(key, e);
-                        return;
-                      }
-                      if (selectedDay !== key) {
-                        setSelectedDay(key);
-                        clearSelection();
-                        return;
-                      }
-                      if (dayListWasOpen) return; // 这一下只用于收起本格浮层，不触发跳转
-                      const finishedStamp = t.completedAt;
-                      openDayInWorkbench(finishedStamp ? toDateKey(new Date(finishedStamp)) : key);
-                    }}
-                    className={cn(
-                      "block w-full cursor-pointer truncate rounded px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-75",
-                      statusChip(t.status),
+                  //（map 参数正名 task：旧名 t 遮蔽 i18n 的 t()，行内调文案键会类型报错）
+                  <div key={task.id} {...chipDragProps(task, key)} className="group/chip flex items-center gap-0.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // 同上：stopPropagation 后 Radix 延迟外部关闭失效，点其他格 chip 时显式收浮层。
+                        // 本格浮层正开着时，点 chip 与点格背景同一语义 = 只收起、不跳工作台
+                        //（2026-10 用户决策：打开「+N 更多」后点格内任务不要直接跳转——
+                        // 想跳走浮层里的条目或先收起再点）
+                        const dayListWasOpen = dayListDay === key;
+                        setDayListDay(null);
+                        if (deleteMode) {
+                          // 删除模式下点 chip = 点它所在的格，修饰键同格背景一致转发（同一格同一动词，
+                          // 勿绕开 Finder 选区模型走隐藏语义）
+                          dispatchDeleteDayPick(key, e);
+                          return;
+                        }
+                        if (selectedDay !== key) {
+                          setSelectedDay(key);
+                          clearSelection();
+                          return;
+                        }
+                        if (dayListWasOpen) return; // 这一下只用于收起本格浮层，不触发跳转
+                        // 过去日的 chip 仅保留「选中本格」语义，不跳工作台（同格子两段式口径）
+                        if (key < today) return;
+                        const finishedStamp = task.completedAt;
+                        openDayInWorkbench(finishedStamp ? toDateKey(new Date(finishedStamp)) : key);
+                      }}
+                      className={cn(
+                        "min-w-0 flex-1 cursor-pointer truncate rounded px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-75",
+                        calendarChipTone(task),
+                      )}
+                      title={task.title}
+                    >
+                      {task.title}
+                    </button>
+                    {/* 单任务删除（2026-10-10 用户需求）：hover 显现 + **选中格内常显**（用户实测
+                        反馈：纯 hover 显现可发现性差，「选到哪个删哪个」的心智 = 点选格子后按钮就
+                        该在）+ 触屏常显，指到哪个删哪个，不必进「按日期删除」三步模式。指针按下/
+                        点击均阻断冒泡——不武装行拖拽、不触发标题点选与格子两段式；删除模式下隐藏
+                        （该模式按天圈选，不给并行的单删动词）。行高不突破 chip 几何预算：删除钮
+                        size-4（16px）< 标题行 17.75px，opacity 切换零布局位移 */}
+                    {!deleteMode && (
+                      <button
+                        type="button"
+                        aria-label={t("action.delete", lang)}
+                        title={t("action.delete", lang)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteCalendarTask(task, key);
+                        }}
+                        className={cn(
+                          "grid size-4 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground transition-opacity hover:bg-muted hover:text-foreground max-[640px]:opacity-100",
+                          selectedDay === key ? "opacity-100" : "opacity-0 group-hover/chip:opacity-100",
+                        )}
+                      >
+                        <Trash2 className="size-3" />
+                      </button>
                     )}
-                    title={t.title}
-                  >
-                    {t.title}
-                  </button>
+                  </div>
                 ))}
                 {/* 溢出入口「+N 更多」：chip 区左下角第三项（2026-10 用户决策：每格最多 2 条任务，
                     更多收进左下角入口）→ 锚定本格的只读浮层日清单（92px 固定格高装不下更多 chip，
@@ -635,29 +836,71 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                           </span>
                         )}
                         <span className="ml-auto font-normal text-muted-foreground">
-                          {t("calendar.dayListCount", lang).replace("{n}", String(chips.length))}
+                          {t("calendar.dayListRemaining", lang).replace("{n}", String(chips.length - MAX_CHIPS))}
                         </span>
                       </div>
-                      {/* 正文：完整列表；点条目直接跳工作台（无「先选中格子」两段式——打开浮层
-                          已是明确意图）。已结束任务锚完成日，与格内 chip 同口径 */}
+                      {/* 正文：仅溢出条目（格内已显示的前 MAX_CHIPS 条不重复列出，2026-10-09
+                          用户要求）；条目可拖到任意日历格迁移任务；点条目直接跳工作台（无
+                          「先选中格子」两段式——打开浮层已是明确意图）。已结束任务锚完成日。
+                          行 = group/row 容器（chipDragProps 挂容器，载荷与「只动被拖那一天」
+                          契约不变）：标题按钮 + 行尾「复制」（原地克隆，拖拽归位见 store 注释） */}
                       <div className="max-h-72 space-y-1 overflow-y-auto">
-                        {chips.map((task) => (
-                          <button
+                        {chips.slice(MAX_CHIPS).map((task) => (
+                          <div
+                            {...chipDragProps(task, key)}
                             key={task.id}
-                            type="button"
-                            onClick={() => {
-                              setDayListDay(null);
-                              const finishedStamp = task.completedAt;
-                              openDayInWorkbench(finishedStamp ? toDateKey(new Date(finishedStamp)) : key);
-                            }}
-                            title={task.title}
-                            className={cn(
-                              "block w-full cursor-pointer truncate rounded px-1.5 py-1 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-75",
-                              statusChip(task.status),
-                            )}
+                            className="group/row flex items-center gap-0.5"
                           >
-                            {task.title}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDayListDay(null);
+                                // 过去日清单条目不跳工作台：浮层本身仍是查看入口，点击只收起
+                                if (key < today) return;
+                                const finishedStamp = task.completedAt;
+                                openDayInWorkbench(finishedStamp ? toDateKey(new Date(finishedStamp)) : key);
+                              }}
+                              title={task.title}
+                              className={cn(
+                                "min-w-0 flex-1 cursor-pointer truncate rounded px-1.5 py-1 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-75",
+                                calendarChipTone(task),
+                              )}
+                            >
+                              {task.title}
+                            </button>
+                            {/* 复制：hover 显现（触屏常显）；指针事件阻断冒泡——点复制不武装
+                                行拖拽；浮层保持打开，副本行随即出现在源行下方（相邻即反馈） */}
+                            <button
+                              type="button"
+                              aria-label={t("action.duplicate", lang)}
+                              title={t("action.duplicate", lang)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                duplicateTask(task.id, key);
+                              }}
+                              className="grid size-6 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/row:opacity-100 max-[640px]:opacity-100"
+                            >
+                              <Copy className="size-3.5" />
+                            </button>
+                            {/* 删除（2026-10-10 单任务删除需求）：与复制同款冒泡阻断（不武装行拖拽）；
+                                确认走根节点 ConfirmDialog——确认弹窗传送门在浮层之外，点「删除/取消」
+                                会经 Radix 外部关闭顺带收起本浮层，删除流已完结、属预期。
+                                destructive 语义色只在 hover 反馈上，与删除模式工具行的危险色用法一致 */}
+                            <button
+                              type="button"
+                              aria-label={t("action.delete", lang)}
+                              title={t("action.delete", lang)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deleteCalendarTask(task, key);
+                              }}
+                              className="grid size-6 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-status-overdue/10 hover:text-status-overdue group-hover/row:opacity-100 max-[640px]:opacity-100"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </PopoverContent>
@@ -727,6 +970,17 @@ function statusChip(status: TaskView["status"]): string {
     default:
       return "bg-muted text-muted-foreground";
   }
+}
+
+// 日历 chip 的分组着色（2026-10-09 用户决策：分组 = 独立单值字段，与标签解耦）：
+// 活动（today/upcoming）且有分组 → 分组名的确定性色档（group-tone-N，见 styles.css）；
+// 逾期/已完成/未安排仍走状态色——**状态语义优先于分组**（欠账红、完结绿不可被分组色淹没）。
+// 任务卡的分组 chip 用同色档作「颜色 ↔ 分组」锚点，见 TaskItem
+function calendarChipTone(task: Pick<TaskView, "group" | "status">): string {
+  if ((task.status === "today" || task.status === "upcoming") && task.group) {
+    return groupToneClass(task.group);
+  }
+  return statusChip(task.status);
 }
 
 function Legend({ color, label }: { color: string; label: string }) {

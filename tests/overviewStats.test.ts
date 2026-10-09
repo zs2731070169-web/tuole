@@ -9,7 +9,7 @@ function makeView(
   extra: Partial<
     Pick<
       TaskView,
-      "status" | "scheduledDate" | "dueDate" | "completedAt" | "parkedDate" | "priority" | "createdAt"
+      "status" | "scheduledDates" | "completedAt" | "parkedDate" | "priority" | "createdAt"
     >
   > = {},
 ): TaskView {
@@ -19,9 +19,9 @@ function makeView(
     title: `task-${seq}`,
     note: "",
     priority: "none",
-    scheduledDate: null,
-    dueDate: null,
-    subtasks: [],
+    scheduledDates: [],todos: [],
+    tags: [],
+    group: null,
     createdAt: "2026-10-01T08:00:00.000Z", // 默认落在近30天窗口内、停靠仅 7 天（不构成积压）
     completedAt: null,
     completedReason: null,
@@ -38,12 +38,12 @@ const TODAY = "2026-10-08";
 describe("computeOverviewStats · 既有口径回归", () => {
   it("六格计数：全部/逾期/进行中/未安排 与周月完成窗口", () => {
     const views = [
-      makeView({ status: "today", scheduledDate: TODAY }),
-      makeView({ status: "upcoming", scheduledDate: "2026-10-10" }),
-      makeView({ status: "overdue", scheduledDate: "2026-10-04" }),
+      makeView({ status: "today", scheduledDates: [TODAY]}),
+      makeView({ status: "upcoming", scheduledDates: ["2026-10-10"]}),
+      makeView({ status: "overdue", scheduledDates: ["2026-10-04"]}),
       makeView({ status: "unscheduled" }),
-      makeView({ status: "done", scheduledDate: "2026-10-06", completedAt: "2026-10-06T08:00:00.000Z" }), // 本周 + 近30天
-      makeView({ status: "done", scheduledDate: "2026-09-05", completedAt: "2026-09-05T08:00:00.000Z" }), // 近30天窗口（09-09 起）之外
+      makeView({ status: "done", scheduledDates: ["2026-10-06"], completedAt: "2026-10-06T08:00:00.000Z" }), // 本周 + 近30天
+      makeView({ status: "done", scheduledDates: ["2026-09-05"], completedAt: "2026-09-05T08:00:00.000Z" }), // 近30天窗口（09-09 起）之外
     ];
     const stats = computeOverviewStats(views, NOW);
     expect(stats.total).toBe(6);
@@ -73,8 +73,8 @@ describe("computeOverviewStats · 既有口径回归", () => {
 describe("computeOverviewStats · 按期完成率", () => {
   it("完成日 = 执行期结束日（dueDate 基准）判按期", () => {
     const views = [
-      makeView({ status: "done", scheduledDate: "2026-10-01", dueDate: "2026-10-05", completedAt: "2026-10-05T08:00:00.000Z" }),
-      makeView({ status: "done", scheduledDate: "2026-10-01", dueDate: "2026-10-05", completedAt: "2026-10-06T08:00:00.000Z" }),
+      makeView({ status: "done", scheduledDates: ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"],completedAt: "2026-10-05T08:00:00.000Z" }),
+      makeView({ status: "done", scheduledDates: ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"],completedAt: "2026-10-06T08:00:00.000Z" }),
     ];
     const stats = computeOverviewStats(views, NOW);
     expect(stats.onTimeCount).toBe(1);
@@ -84,8 +84,8 @@ describe("computeOverviewStats · 按期完成率", () => {
 
   it("单日任务：完成日 = 安排日按期，晚于安排日拖欠", () => {
     const views = [
-      makeView({ status: "done", scheduledDate: "2026-10-01", completedAt: "2026-10-01T08:00:00.000Z" }),
-      makeView({ status: "done", scheduledDate: "2026-10-01", completedAt: "2026-10-03T08:00:00.000Z" }),
+      makeView({ status: "done", scheduledDates: ["2026-10-01"], completedAt: "2026-10-01T08:00:00.000Z" }),
+      makeView({ status: "done", scheduledDates: ["2026-10-01"], completedAt: "2026-10-03T08:00:00.000Z" }),
     ];
     const stats = computeOverviewStats(views, NOW);
     expect(stats.onTimeCount).toBe(1);
@@ -106,11 +106,11 @@ describe("computeOverviewStats · 按期完成率", () => {
 describe("computeOverviewStats · 逾期账龄分布", () => {
   it("桶边界：结束 1/3 天前归首桶，4/7 天前归中桶，8 天前起归末桶", () => {
     const views = [
-      makeView({ status: "overdue", scheduledDate: "2026-10-07" }), // 1 天
-      makeView({ status: "overdue", scheduledDate: "2026-10-05" }), // 3 天
-      makeView({ status: "overdue", scheduledDate: "2026-10-04" }), // 4 天
-      makeView({ status: "overdue", scheduledDate: "2026-10-01" }), // 7 天
-      makeView({ status: "overdue", scheduledDate: "2026-09-30" }), // 8 天
+      makeView({ status: "overdue", scheduledDates: ["2026-10-07"]}), // 1 天
+      makeView({ status: "overdue", scheduledDates: ["2026-10-05"]}), // 3 天
+      makeView({ status: "overdue", scheduledDates: ["2026-10-04"]}), // 4 天
+      makeView({ status: "overdue", scheduledDates: ["2026-10-01"]}), // 7 天
+      makeView({ status: "overdue", scheduledDates: ["2026-09-30"]}), // 8 天
     ];
     const stats = computeOverviewStats(views, NOW);
     expect(stats.overdueAgeBuckets).toEqual([2, 2, 1]);
@@ -118,14 +118,14 @@ describe("computeOverviewStats · 逾期账龄分布", () => {
   });
 
   it("账龄按执行期结束日（dueDate）计，而非起始日", () => {
-    const views = [makeView({ status: "overdue", scheduledDate: "2026-09-20", dueDate: "2026-10-05" })]; // 结束 3 天前
+    const views = [makeView({ status: "overdue", scheduledDates: ["2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"],})]; // 结束 3 天前
     const stats = computeOverviewStats(views, NOW);
     expect(stats.overdueAgeBuckets).toEqual([1, 0, 0]);
     expect(stats.overdueMaxAgeDays).toBe(3);
   });
 
   it("无逾期：三桶全零、最长账龄 null", () => {
-    const stats = computeOverviewStats([makeView({ status: "today", scheduledDate: TODAY })], NOW);
+    const stats = computeOverviewStats([makeView({ status: "today", scheduledDates: [TODAY]})], NOW);
     expect(stats.overdueAgeBuckets).toEqual([0, 0, 0]);
     expect(stats.overdueMaxAgeDays).toBeNull();
   });
@@ -148,8 +148,8 @@ describe("computeOverviewStats · 未安排积压年龄", () => {
 describe("computeOverviewStats · 未来 7 天负载", () => {
   it("今天起含今天共 7 天，跨日执行期逐日记数、今天描环位为首位", () => {
     const views = [
-      makeView({ status: "today", scheduledDate: "2026-10-08", dueDate: "2026-10-10" }),
-      makeView({ status: "upcoming", scheduledDate: "2026-10-14" }), // 第 7 天（index 6）
+      makeView({ status: "today", scheduledDates: ["2026-10-08", "2026-10-09", "2026-10-10"],}),
+      makeView({ status: "upcoming", scheduledDates: ["2026-10-14"]}), // 第 7 天（index 6）
     ];
     const stats = computeOverviewStats(views, NOW);
     expect(stats.upcomingLoadDays.map((d) => d.key)).toEqual([
@@ -161,7 +161,7 @@ describe("computeOverviewStats · 未来 7 天负载", () => {
 
   it("已完成与未安排任务不计入负载", () => {
     const views = [
-      makeView({ status: "done", scheduledDate: TODAY, completedAt: "2026-10-08T08:00:00.000Z" }),
+      makeView({ status: "done", scheduledDates: [TODAY], completedAt: "2026-10-08T08:00:00.000Z" }),
       makeView({ status: "unscheduled" }),
     ];
     const stats = computeOverviewStats(views, NOW);
@@ -211,7 +211,7 @@ describe("computeOverviewStats · 本周环比", () => {
 describe("computeOverviewStats · 近30天新建 vs 完成", () => {
   it("窗口内创建计数（含已完成），净差 = 新建 − 完成；窗口边界为 29 天前（含）", () => {
     const views = [
-      makeView({ status: "today", scheduledDate: TODAY, createdAt: "2026-10-08T08:00:00.000Z" }),
+      makeView({ status: "today", scheduledDates: [TODAY], createdAt: "2026-10-08T08:00:00.000Z" }),
       makeView({ status: "unscheduled", createdAt: "2026-09-15T08:00:00.000Z" }),
       makeView({ status: "done", completedAt: "2026-10-07T08:00:00.000Z", createdAt: "2026-09-09T08:00:00.000Z" }), // 边界：恰 29 天前
       makeView({ status: "unscheduled", createdAt: "2026-09-08T08:00:00.000Z" }), // 窗口外
@@ -226,13 +226,13 @@ describe("computeOverviewStats · 近30天新建 vs 完成", () => {
 describe("computeOverviewStats · 未结优先级分布", () => {
   it("只统计未完成任务；四档计数齐备", () => {
     const views = [
-      makeView({ status: "today", scheduledDate: TODAY, priority: "high" }),
+      makeView({ status: "today", scheduledDates: [TODAY], priority: "high" }),
       makeView({ status: "unscheduled", priority: "high" }),
       makeView({ status: "done", priority: "high", completedAt: "2026-10-07T08:00:00.000Z" }), // 已完成不参与
-      makeView({ status: "upcoming", scheduledDate: "2026-10-10", priority: "medium" }),
-      makeView({ status: "overdue", scheduledDate: "2026-10-04", priority: "medium" }),
+      makeView({ status: "upcoming", scheduledDates: ["2026-10-10"], priority: "medium" }),
+      makeView({ status: "overdue", scheduledDates: ["2026-10-04"], priority: "medium" }),
       makeView({ status: "unscheduled" }), // none
-      makeView({ status: "today", scheduledDate: TODAY }), // none
+      makeView({ status: "today", scheduledDates: [TODAY]}), // none
     ];
     const stats = computeOverviewStats(views, NOW);
     expect(stats.priorityMix).toEqual<Record<Priority, number>>({

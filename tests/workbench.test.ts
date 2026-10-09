@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { bucketWorkbenchColumns } from "../src/shared/workbench";
 import type { TaskView } from "../src/shared/types";
 
-// 最小任务夹具：分桶只读 status / scheduledDate / completedAt / sortOrder
+// 最小任务夹具：分桶只读 status / scheduledDates / completedAt / sortOrder
 let seq = 0;
 function makeView(
   status: TaskView["status"],
-  extra: Partial<Pick<TaskView, "scheduledDate" | "dueDate" | "completedAt" | "sortOrder" | "parkedDate">> = {},
+  extra: Partial<Pick<TaskView, "scheduledDates" | "completedAt" | "sortOrder" | "parkedDate">> = {},
 ): TaskView {
   seq += 1;
   return {
@@ -15,9 +15,9 @@ function makeView(
     title: `task-${seq}`,
     note: "",
     priority: "none",
-    scheduledDate: null,
-    dueDate: null,
-    subtasks: [],
+    scheduledDates: [],todos: [],
+    tags: [],
+    group: null,
     createdAt: "2026-10-01T00:00:00.000Z",
     completedAt: null,
     completedReason: null,
@@ -32,12 +32,12 @@ const TODAY = "2026-10-07"; // 周三；所在周周一为 2026-10-05
 describe("bucketWorkbenchColumns", () => {
   it("选中今天：今天/逾期/未安排/当天完成 各归其位；完成日早于选中日的已完成任务不进任何栏", () => {
     const views = [
-      makeView("today", { scheduledDate: TODAY }),
-      makeView("overdue", { scheduledDate: "2026-10-01" }),
+      makeView("today", { scheduledDates: [TODAY]}),
+      makeView("overdue", { scheduledDates: ["2026-10-01"]}),
       makeView("unscheduled"),
-      makeView("upcoming", { scheduledDate: "2026-10-10" }),
-      makeView("done", { scheduledDate: "2026-10-06", completedAt: "2026-10-07T08:00:00.000Z" }),
-      makeView("done", { scheduledDate: "2026-10-05", completedAt: "2026-10-05T08:00:00.000Z" }),
+      makeView("upcoming", { scheduledDates: ["2026-10-10"]}),
+      makeView("done", { scheduledDates: [TODAY], completedAt: "2026-10-07T08:00:00.000Z" }),
+      makeView("done", { scheduledDates: ["2026-10-05"], completedAt: "2026-10-05T08:00:00.000Z" }),
     ];
     const cols = bucketWorkbenchColumns(views, TODAY, TODAY);
     expect(cols.dayList.map((v) => v.id)).toEqual([views[0].id]);
@@ -49,10 +49,10 @@ describe("bucketWorkbenchColumns", () => {
 
   it("选中过去某天：安排在该天且未完成的任务进进行中栏（此刻为逾期态），其余往日逾期归独立逾期栏且不重复", () => {
     const views = [
-      makeView("overdue", { scheduledDate: "2026-10-03" }), // 恰好安排在选中日
-      makeView("overdue", { scheduledDate: "2026-09-30" }), // 更早的逾期，不属于选中日
-      makeView("done", { scheduledDate: "2026-10-03", completedAt: "2026-10-03T09:00:00.000Z" }),
-      makeView("upcoming", { scheduledDate: "2026-10-10" }),
+      makeView("overdue", { scheduledDates: ["2026-10-03"]}), // 恰好安排在选中日
+      makeView("overdue", { scheduledDates: ["2026-09-30"]}), // 更早的逾期，不属于选中日
+      makeView("done", { scheduledDates: ["2026-10-03"], completedAt: "2026-10-03T09:00:00.000Z" }),
+      makeView("upcoming", { scheduledDates: ["2026-10-10"]}),
     ];
     const cols = bucketWorkbenchColumns(views, "2026-10-03", TODAY);
     expect(cols.dayList.map((v) => v.id)).toEqual([views[0].id]);
@@ -61,15 +61,32 @@ describe("bucketWorkbenchColumns", () => {
     expect(cols.ahead).toBe(1);
   });
 
-  it("选中未来某天：排在那天的 upcoming 进当日栏，其余计入 ahead", () => {
-    const views = [makeView("upcoming", { scheduledDate: "2026-10-09" }), makeView("upcoming", { scheduledDate: "2026-10-12" })];
+  it("选中未来某天：已安排任务进进行中，其余计入 ahead", () => {
+    const views = [makeView("upcoming", { scheduledDates: ["2026-10-09"]}), makeView("upcoming", { scheduledDates: ["2026-10-12"]})];
     const cols = bucketWorkbenchColumns(views, "2026-10-09", TODAY);
     expect(cols.dayList.map((v) => v.id)).toEqual([views[0].id]);
+    expect(cols.unscheduled).toEqual([]);
     expect(cols.ahead).toBe(1);
   });
 
+  it("已安排的跨天任务在覆盖的每个未来日都进进行中", () => {
+    const staged = makeView("upcoming", { scheduledDates: ["2026-10-12", "2026-10-13", "2026-10-14"] });
+    expect(bucketWorkbenchColumns([staged], "2026-10-12", TODAY).dayList).toEqual([staged]);
+    expect(bucketWorkbenchColumns([staged], "2026-10-14", TODAY).dayList).toEqual([staged]);
+    expect(bucketWorkbenchColumns([staged], "2026-10-12", TODAY).unscheduled).toEqual([]);
+    expect(bucketWorkbenchColumns([staged], "2026-10-12", "2026-10-12").dayList).toEqual([staged]);
+    expect(bucketWorkbenchColumns([staged], "2026-10-12", "2026-10-12").unscheduled).toEqual([]);
+  });
+
+  it("未安排任务也按 scheduledDates 归日，不因有日期进入进行中", () => {
+    const unscheduled = makeView("unscheduled", { scheduledDates: ["2026-10-12"] });
+    const cols = bucketWorkbenchColumns([unscheduled], "2026-10-12", TODAY);
+    expect(cols.unscheduled).toEqual([unscheduled]);
+    expect(cols.dayList).toEqual([]);
+  });
+
   it("跨天任务在起止日期内的任一天都进进行中栏，区间外不进", () => {
-    const span = makeView("today", { scheduledDate: "2026-10-05", dueDate: "2026-10-09" });
+    const span = makeView("today", { scheduledDates: ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"],});
     expect(bucketWorkbenchColumns([span], "2026-10-05", TODAY).dayList).toEqual([span]);
     expect(bucketWorkbenchColumns([span], "2026-10-07", TODAY).dayList).toEqual([span]);
     expect(bucketWorkbenchColumns([span], "2026-10-09", TODAY).dayList).toEqual([span]);
@@ -104,10 +121,10 @@ describe("bucketWorkbenchColumns", () => {
 
 describe("栏内排序（sortOrder + store.reorder 协同）", () => {
   it("各栏按 sortOrder 升序渲染（乱序输入也归位），已完成栏同样参与排序", () => {
-    const a = makeView("today", { scheduledDate: TODAY, sortOrder: 30 });
-    const b = makeView("today", { scheduledDate: TODAY, sortOrder: 10 });
-    const c = makeView("done", { scheduledDate: TODAY, completedAt: `${TODAY}T08:00:00.000Z`, sortOrder: 9 });
-    const d = makeView("done", { scheduledDate: TODAY, completedAt: `${TODAY}T09:00:00.000Z`, sortOrder: 20 });
+    const a = makeView("today", { scheduledDates: [TODAY], sortOrder: 30 });
+    const b = makeView("today", { scheduledDates: [TODAY], sortOrder: 10 });
+    const c = makeView("done", { scheduledDates: [TODAY], completedAt: `${TODAY}T08:00:00.000Z`, sortOrder: 9 });
+    const d = makeView("done", { scheduledDates: [TODAY], completedAt: `${TODAY}T09:00:00.000Z`, sortOrder: 20 });
     const cols = bucketWorkbenchColumns([a, b, c, d], TODAY, TODAY);
     expect(cols.dayList.map((v) => v.id)).toEqual([b.id, a.id]);
     expect(cols.doneOnDay.map((v) => v.id)).toEqual([c.id, d.id]);
@@ -118,9 +135,9 @@ describe("栏内排序（sortOrder + store.reorder 协同）", () => {
     const day = todayKey();
     useTaskStore.setState({
       tasks: [
-        { ...baseTask("r1"), scheduledDate: day },
-        { ...baseTask("r2"), scheduledDate: day },
-        { ...baseTask("r3"), scheduledDate: day },
+        { ...baseTask("r1"), scheduledDates: [day]},
+        { ...baseTask("r2"), scheduledDates: [day]},
+        { ...baseTask("r3"), scheduledDates: [day]},
       ],
     });
     useTaskStore.getState().reorder(["r3", "r1", "r2"]); // 拖 r3 到最前
@@ -139,8 +156,9 @@ function baseTask(id: string) {
     title: `任务 ${id}`,
     note: "",
     priority: "none" as const,
-    dueDate: null,
-    subtasks: [],
+    todos: [],
+    tags: [],
+    group: null,
     createdAt: "2026-10-01T00:00:00.000Z",
     completedAt: null,
     completedReason: null,
