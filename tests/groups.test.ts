@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   GROUP_COLOR_COUNT,
   groupColorIndex,
+  groupToneBgClass,
   groupToneClass,
   normalizeGroup,
   collectGroupVocabulary,
@@ -30,15 +31,27 @@ describe("groupColorIndex 确定性哈希", () => {
 });
 
 describe("groupToneClass", () => {
-  it("非空分组映射到 group-tone-N 类名", () => {
-    expect(groupToneClass("工作")).toMatch(/^group-tone-\d$/);
-    expect(groupToneClass("工作")).toBe(`group-tone-${groupColorIndex("工作")}`);
+  it("非空分组映射到「浅底 + 深字」整对类（2026-10-10 拆单通道类后的形态）", () => {
+    expect(groupToneClass("工作")).toBe(`group-tone-bg-${groupColorIndex("工作")} group-tone-text-${groupColorIndex("工作")}`);
   });
 
   it("空值返回空串，保持调用方默认样式", () => {
     expect(groupToneClass(null)).toBe("");
     expect(groupToneClass(undefined)).toBe("");
     expect(groupToneClass("")).toBe("");
+  });
+});
+
+describe("groupToneBgClass 背景单通道", () => {
+  it("非空分组映射到 group-tone-bg-N，与整对类同档（背景通道一致性）", () => {
+    expect(groupToneBgClass("工作")).toBe(`group-tone-bg-${groupColorIndex("工作")}`);
+    expect(groupToneClass("生活")).toContain(groupToneBgClass("生活"));
+  });
+
+  it("空值返回空串，保持调用方默认样式", () => {
+    expect(groupToneBgClass(null)).toBe("");
+    expect(groupToneBgClass(undefined)).toBe("");
+    expect(groupToneBgClass("")).toBe("");
   });
 });
 

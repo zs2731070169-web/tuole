@@ -17,6 +17,7 @@ import { t } from "../../lib/i18n";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { DateRangeField } from "../../components/DateRangeField";
 import { STATUS_META, statusToneClass } from "../../shared/statusMachine";
+import { computeTaskElapsed, formatTaskElapsed } from "../../shared/taskElapsed";
 import { dayKeysInRange } from "../../lib/date";
 import { isContiguousDays } from "../../shared/taskDates";
 import { workbenchDateLabel } from "../../lib/date";
@@ -79,6 +80,10 @@ export function TaskEditor({ task }: { task: TaskView }) {
   // 候选要随存量标签增长而更新，词表必须来自实时 tasks
   const allTasks = useTaskStore((s) => s.tasks);
   const tagVocabulary = useMemo(() => collectTagVocabulary(allTasks), [allTasks]);
+  // 执行花费时间（纯派生只读，不进缓冲区——关闭抽屉即弃、保存也不落库）：头部 status chip 旁展示，
+  // 与任务卡元信息行同口径（done → 耗时；today/overdue → 已进行；其余无值不渲染）
+  const elapsed = computeTaskElapsed(task, new Date().toISOString());
+  const elapsedText = elapsed ? formatTaskElapsed(elapsed, lang) : null;
   const tagSuggestions = useMemo(
     () => matchTagSuggestions(tagVocabulary, tagDraft, tags),
     [tagVocabulary, tagDraft, tags],
@@ -201,6 +206,8 @@ export function TaskEditor({ task }: { task: TaskView }) {
           >
             {lang === "zh-CN" ? STATUS_META[task.status].label : task.status}
           </span>
+          {/* 执行花费时间：只读派生展示（勿做成可编辑字段——耗时随状态机自动演进，无手工口径） */}
+          {elapsedText && <span className="text-[12px] tabular-nums text-muted-foreground">{elapsedText}</span>}
           <button onClick={closeEditor} className="ml-auto grid size-8 place-items-center rounded-lg hover:bg-muted">
             <X className="size-4" />
           </button>

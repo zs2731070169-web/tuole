@@ -278,29 +278,51 @@ html.desktop-cursors :is(input, textarea, [contenteditable]) * {
   display: none;
 }
 
-/* ── 任务分组色板 group-tone-0..9（2026-10-09）──────────────────────────────
-   同一分组的任务在日历格 chip 与任务卡分组 chip 共用同一浅色填充，
-   档位由分组名确定性哈希分配（shared/groups.ts），免配置、跨会话稳定。分组 = 独立单值字段，与标签解耦。
-   压低 chroma（是底色不是数据强调色）；「浅底 + 深字」明暗双模各自成对。
-   优先级约定：状态语义色（逾期红 / 完成绿 / 未安排灰）高于分组色——日历 chip
-   只对活动任务（today/upcoming）应用分组色，欠账与完结不可被分组色淹没 */
-.group-tone-0  { background-color: oklch(0.952 0.030 20);  color: oklch(0.45 0.115 20); }
-.group-tone-1  { background-color: oklch(0.952 0.035 55);  color: oklch(0.46 0.110 55); }
-.group-tone-2  { background-color: oklch(0.955 0.035 90);  color: oklch(0.44 0.105 90); }
-.group-tone-3  { background-color: oklch(0.952 0.035 125); color: oklch(0.42 0.105 125); }
-.group-tone-4  { background-color: oklch(0.950 0.030 160); color: oklch(0.42 0.100 160); }
-.group-tone-5  { background-color: oklch(0.950 0.030 195); color: oklch(0.44 0.100 195); }
-.group-tone-6  { background-color: oklch(0.952 0.035 230); color: oklch(0.44 0.110 230); }
-.group-tone-7  { background-color: oklch(0.952 0.035 265); color: oklch(0.46 0.110 265); }
-.group-tone-8  { background-color: oklch(0.952 0.035 300); color: oklch(0.46 0.110 300); }
-.group-tone-9  { background-color: oklch(0.952 0.035 335); color: oklch(0.46 0.115 335); }
-.dark .group-tone-0  { background-color: oklch(0.30 0.045 20);  color: oklch(0.83 0.085 20); }
-.dark .group-tone-1  { background-color: oklch(0.30 0.050 55);  color: oklch(0.83 0.080 55); }
-.dark .group-tone-2  { background-color: oklch(0.28 0.050 90);  color: oklch(0.85 0.080 90); }
-.dark .group-tone-3  { background-color: oklch(0.29 0.045 125); color: oklch(0.84 0.080 125); }
-.dark .group-tone-4  { background-color: oklch(0.30 0.040 160); color: oklch(0.84 0.075 160); }
-.dark .group-tone-5  { background-color: oklch(0.30 0.040 195); color: oklch(0.85 0.075 195); }
-.dark .group-tone-6  { background-color: oklch(0.30 0.045 230); color: oklch(0.85 0.085 230); }
-.dark .group-tone-7  { background-color: oklch(0.29 0.045 265); color: oklch(0.83 0.085 265); }
-.dark .group-tone-8  { background-color: oklch(0.30 0.045 300); color: oklch(0.83 0.085 300); }
-.dark .group-tone-9  { background-color: oklch(0.30 0.050 335); color: oklch(0.83 0.090 335); }
+/* ── 任务分组色板 group-tone-bg/text-0..9（2026-10-09；2026-10-10 拆单通道类）──────
+   同一分组的任务共用同一浅色填充，档位由分组名确定性哈希分配（shared/groups.ts），
+   免配置、跨会话稳定。分组 = 独立单值字段，与标签解耦。压低 chroma（是底色不是数据强调色）；
+   「浅底 + 深字」明暗双模各自成对。
+   背景与文字拆成两个单通道类：日历 chip 按「背景 = 分组、文字 = 状态」混排——
+   同组任务任意生命周期同浅底（2026-10-10 用户决策），状态语义由文字承载
+   （逾期红字 / 完成灰字删除线 / 未安排灰字，见 shared/calendarChipTone.ts）；
+   任务卡/编辑抽屉的分组 chip 则经 groupToneClass 整对使用 */
+.group-tone-bg-0  { background-color: oklch(0.952 0.030 20); }
+.group-tone-bg-1  { background-color: oklch(0.952 0.035 55); }
+.group-tone-bg-2  { background-color: oklch(0.955 0.035 90); }
+.group-tone-bg-3  { background-color: oklch(0.952 0.035 125); }
+.group-tone-bg-4  { background-color: oklch(0.950 0.030 160); }
+.group-tone-bg-5  { background-color: oklch(0.950 0.030 195); }
+.group-tone-bg-6  { background-color: oklch(0.952 0.035 230); }
+.group-tone-bg-7  { background-color: oklch(0.952 0.035 265); }
+.group-tone-bg-8  { background-color: oklch(0.952 0.035 300); }
+.group-tone-bg-9  { background-color: oklch(0.952 0.035 335); }
+.group-tone-text-0  { color: oklch(0.45 0.115 20); }
+.group-tone-text-1  { color: oklch(0.46 0.110 55); }
+.group-tone-text-2  { color: oklch(0.44 0.105 90); }
+.group-tone-text-3  { color: oklch(0.42 0.105 125); }
+.group-tone-text-4  { color: oklch(0.42 0.100 160); }
+.group-tone-text-5  { color: oklch(0.44 0.100 195); }
+.group-tone-text-6  { color: oklch(0.44 0.110 230); }
+.group-tone-text-7  { color: oklch(0.46 0.110 265); }
+.group-tone-text-8  { color: oklch(0.46 0.110 300); }
+.group-tone-text-9  { color: oklch(0.46 0.115 335); }
+.dark .group-tone-bg-0  { background-color: oklch(0.30 0.045 20); }
+.dark .group-tone-bg-1  { background-color: oklch(0.30 0.050 55); }
+.dark .group-tone-bg-2  { background-color: oklch(0.28 0.050 90); }
+.dark .group-tone-bg-3  { background-color: oklch(0.29 0.045 125); }
+.dark .group-tone-bg-4  { background-color: oklch(0.30 0.040 160); }
+.dark .group-tone-bg-5  { background-color: oklch(0.30 0.040 195); }
+.dark .group-tone-bg-6  { background-color: oklch(0.30 0.045 230); }
+.dark .group-tone-bg-7  { background-color: oklch(0.29 0.045 265); }
+.dark .group-tone-bg-8  { background-color: oklch(0.30 0.045 300); }
+.dark .group-tone-bg-9  { background-color: oklch(0.30 0.050 335); }
+.dark .group-tone-text-0  { color: oklch(0.83 0.085 20); }
+.dark .group-tone-text-1  { color: oklch(0.83 0.080 55); }
+.dark .group-tone-text-2  { color: oklch(0.85 0.080 90); }
+.dark .group-tone-text-3  { color: oklch(0.84 0.080 125); }
+.dark .group-tone-text-4  { color: oklch(0.84 0.075 160); }
+.dark .group-tone-text-5  { color: oklch(0.85 0.075 195); }
+.dark .group-tone-text-6  { color: oklch(0.85 0.085 230); }
+.dark .group-tone-text-7  { color: oklch(0.83 0.085 265); }
+.dark .group-tone-text-8  { color: oklch(0.83 0.085 300); }
+.dark .group-tone-text-9  { color: oklch(0.83 0.090 335); }

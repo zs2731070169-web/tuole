@@ -1,7 +1,8 @@
 // 任务分组维度（2026-10-09 用户决策：分组 = 独立单值字段，与标签解耦）。
 // 分组是互斥归类（一任务一组，日历同组同色成块识别）；标签是自由多值标注（纯展示）。
 // 色档由分组名哈希决定——确定性、免配置、跨会话稳定：同一分组永远同色、处处同色。
-// 色板类 .group-tone-0..9（明暗双模）定义在 styles.css，此处做「分组名 → 档位」与词表纯映射
+// 色板类 .group-tone-bg-N / .group-tone-text-N（单通道拆分，明暗双模）定义在 styles.css，
+// 此处做「分组名 → 档位」与词表纯映射
 export const GROUP_COLOR_COUNT = 10;
 
 /** djb2 哈希取模：同分组恒定同档；分组词表天然很小，10 档碰撞罕见且无害（仅共享颜色） */
@@ -13,10 +14,23 @@ export function groupColorIndex(group: string): number {
   return hash % GROUP_COLOR_COUNT;
 }
 
-/** 分组名 → 色档类名（group-tone-N 同时提供背景与文字色）；空值返回空串保持默认样式 */
+/**
+ * 分组名 → 「浅底 + 深字」整对类名（group-tone-bg-N group-tone-text-N）。
+ * 供任务卡/编辑抽屉的分组 chip 等「底与字都用分组色」的场景；空值返回空串保持默认样式
+ */
 export function groupToneClass(group: string | null | undefined): string {
   if (!group) return "";
-  return `group-tone-${groupColorIndex(group)}`;
+  return `${groupToneBgClass(group)} group-tone-text-${groupColorIndex(group)}`;
+}
+
+/**
+ * 分组名 → 背景单通道类名（group-tone-bg-N）。供日历 chip 的「背景 = 分组、文字 = 状态」
+ * 混排（同组任意生命周期同浅底，2026-10-10 用户决策，见 shared/calendarChipTone.ts）；
+ * 空值返回空串保持默认样式
+ */
+export function groupToneBgClass(group: string | null | undefined): string {
+  if (!group) return "";
+  return `group-tone-bg-${groupColorIndex(group)}`;
 }
 
 /** 存储载入归一：非字符串/空白 → null；合法值 trim 后返回（空串视为无分组） */

@@ -106,8 +106,9 @@ function App() {
     }
     return applyFilters(views, filter);
   }, [views, filter, view]);
-  // 概览统计（固定头部 StatsCard + 滚动流洞察面板共用的唯一派生结果）：单点 useMemo，组件零内联计算
-  const overviewStats = useMemo(() => computeOverviewStats(views, new Date()), [views]);
+  // 概览统计（固定头部 StatsCard 专用：单点 useMemo，组件零内联计算）。
+  // 洞察面板的时间投入不走本派生——其组件内自调 computeMonthInvestment（月锚点随翻页变化，见 InsightsPanel）
+  const overviewStats = useMemo(() => computeOverviewStats(views), [views]);
 
   // 编辑对象从原始 tasks 取（草稿被 views 排除，但抽屉要能继续编辑它），status 现算补齐
   const editingTask = useMemo(() => {
@@ -190,7 +191,7 @@ function App() {
             </div>
             <div aria-hidden="true" style={{ height: overviewHeaderHeight }} />
             {/* 洞察面板在滚动流（固定头部不膨胀）：多维度统计置于折叠列表之上 */}
-            <InsightsPanel stats={overviewStats} />
+            <InsightsPanel views={views} />
           </>
         )}
 

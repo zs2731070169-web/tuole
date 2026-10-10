@@ -1,134 +1,20 @@
-// 概览统计派生（纯函数，无 React 依赖）：StatsCard 六格 + 近30天节奏图 + 洞察面板新口径的唯一真相源。
+// 概览统计派生（纯函数，无 React 依赖）：StatsCard 五格 + 时间投入自然月网格的唯一真相源。
 // 组件零内联计算，全部口径在此并受 tests/overviewStats.test.ts 锚定。
+// 洞察六指标（按期率/环比/账龄/优先级/负载/剪刀差）与节奏图已于 2026-10-10 随用户决策下线，勿加回。
 import type { TaskView } from "./types";
-import {
-  addDays,
-  addDaysKey,
-  differenceInCalendarDays,
-  endOfWeek,
-  fromDateKey,
-  startOfWeek,
-  toDateKey,
-  todayKey,
-} from "../lib/date";
-import { completedDay, firstScheduledDay, scheduleEnd, scheduledOnDay } from "./taskDates";
+import { addDaysKey, todayKey, fromDateKey } from "../lib/date";
+import { taskSpendWindow } from "./taskElapsed";
 
 export interface OverviewStats {
-  // —— 既有口径（StatsCard 六格 + 节奏图）——
+  // —— StatsCard 五格 + 总体完成进度 ——
   total: number; // 全部任务数
   totalDone: number; // 已完成总数（有 completedAt 即视为已结束）
   overdue: number; // 逾期数
   unscheduled: number; // 未安排数
   active: number; // 进行中 = 今天 + 未来安排（不含未安排）
-  weekCompleted: number; // 本周（周一起）完成数
-  monthCompleted: number; // 近30天（含今天）完成数
-  daily: number[]; // 近30天每日完成数，槽位与 dailyKeys 对齐（i=0 = 29 天前，i=29 = 今天）
-  dailyKeys: string[]; // 各槽位日期键
-  peak: number; // daily 峰值（无数据时为 1，避免除零）
-  // —— 洞察面板：按期完成率 ——
-  onTimeRate: number | null; // 按期完成百分比（0–100）；无可判定任务为 null
-  onTimeCount: number; // 按期完成数
-  onTimeJudged: number; // 可判定分母（无执行期基准的已完成任务不计入）
-  // —— 洞察面板：逾期账龄 ——
-  overdueAgeBuckets: [number, number, number]; // 账龄桶计数：1–3 天 / 4–7 天 / ≥8 天
-  overdueMaxAgeDays: number | null; // 最长账龄天数；无逾期为 null
-  // —— 洞察面板：未安排积压 ——
-  staleUnscheduledCount: number; // 停靠超过 7 天（≥8 天）的未安排任务数
-  // —— 洞察面板：未来 7 天负载 ——
-  upcomingLoadDays: { key: string; count: number }[]; // 今天起含今天共 7 天，count = 活动任务执行期覆盖该日
-  // —— 洞察面板：本周环比 ——
-  lastWeekCompleted: number; // 上周完成数
-  weekDeltaPercent: number | null; // 环比百分比（+/-，四舍五入）；上周为 0 时 null（不给 ±∞）
-  // —— 洞察面板：近30天新建 vs 完成（剪刀差）——
-  createdIn30: number; // 近30天新建数（含已完成，按 createdAt）
-  netFlow30: number; // 净差 = 新建 − 完成（正数 = 待办在积压）
-  // —— 洞察面板：未结优先级分布 ——
-  priorityMix: { high: number; medium: number; low: number; none: number }; // 未完成任务的优先级计数
 }
 
-// 逾期账龄桶边界：≤3 天 / ≤7 天 / 更久
-const OVERDUE_AGE_RECENT_MAX = 3;
-const OVERDUE_AGE_WEEK_MAX = 7;
-// 未安排积压阈值：停靠超过 7 天（含第 8 天）视为积压
-const STALE_UNSCHEDULED_MIN_DAYS = 8;
-
-export function computeOverviewStats(views: TaskView[], now: Date): OverviewStats {
-  const today = todayKey(now);
-  const weekStart = toDateKey(startOfWeek(now, { weekStartsOn: 1 }));
-  const weekEnd = toDateKey(endOfWeek(now, { weekStartsOn: 1 }));
-  // 上周窗口：任取上周内一天为锚点取其所在周（周一起算）
-  const lastWeekAnchor = addDays(now, -7);
-  const lastWeekStart = toDateKey(startOfWeek(lastWeekAnchor, { weekStartsOn: 1 }));
-  const lastWeekEnd = toDateKey(endOfWeek(lastWeekAnchor, { weekStartsOn: 1 }));
-  const monthStart = toDateKey(addDays(now, -29));
-
-  // 近 30 天每日完成数（含今天）：i=0 = 29 天前（最左），i=29 = 今天（最右）
-  const daily: number[] = Array.from({ length: 30 }, () => 0);
-  const dailyKeys: string[] = Array.from({ length: 30 }, (_, i) => toDateKey(addDays(now, -(29 - i))));
-  // 未来 7 天负载槽位（今天起含今天）
-  const upcomingLoadDays = Array.from({ length: 7 }, (_, i) => ({ key: addDaysKey(today, i), count: 0 }));
-
-  let weekCompleted = 0;
-  let monthCompleted = 0;
-  let lastWeekCompleted = 0;
-  let onTimeCount = 0;
-  let onTimeJudged = 0;
-  let createdIn30 = 0;
-  let staleUnscheduledCount = 0;
-  let overdueMaxAgeDays: number | null = null;
-  const overdueAgeBuckets: [number, number, number] = [0, 0, 0];
-  const priorityMix = { high: 0, medium: 0, low: 0, none: 0 };
-
-  for (const v of views) {
-    // —— 完成侧：周/月窗口、节奏槽位、环比、按期判定 ——
-    if (v.completedAt) {
-      const day = completedDay(v)!;
-      if (day >= monthStart && day <= today) {
-        monthCompleted += 1;
-        const idx = differenceInCalendarDays(fromDateKey(day), fromDateKey(monthStart));
-        if (idx >= 0 && idx < 30) daily[idx] += 1;
-      }
-      if (day >= weekStart && day <= weekEnd) weekCompleted += 1;
-      else if (day >= lastWeekStart && day <= lastWeekEnd) lastWeekCompleted += 1;
-
-      // 按期判定：基准 = 执行期结束日（dueDate ?? scheduledDate）；无基准的历史/导入数据不入分母
-      const baseline = scheduleEnd(v);
-      if (baseline) {
-        onTimeJudged += 1;
-        if (day <= baseline) onTimeCount += 1;
-      }
-    } else {
-      // —— 未结侧：未来负载（执行期覆盖记数）+ 优先级分布 ——
-      for (const slot of upcomingLoadDays) {
-        if (scheduledOnDay(v, slot.key)) slot.count += 1;
-      }
-      priorityMix[v.priority] += 1;
-    }
-
-    // —— 创建侧：近30天剪刀差（含已完成任务）——
-    const createdDayKey = toDateKey(new Date(v.createdAt));
-    if (createdDayKey >= monthStart && createdDayKey <= today) createdIn30 += 1;
-
-    // —— 逾期账龄：按执行期结束日距今天数分桶（逾期状态保证有基准，防御性跳过缺失）——
-    if (v.status === "overdue") {
-      const end = scheduleEnd(v);
-      if (end) {
-        const age = Math.max(1, differenceInCalendarDays(fromDateKey(today), fromDateKey(end)));
-        if (age <= OVERDUE_AGE_RECENT_MAX) overdueAgeBuckets[0] += 1;
-        else if (age <= OVERDUE_AGE_WEEK_MAX) overdueAgeBuckets[1] += 1;
-        else overdueAgeBuckets[2] += 1;
-        overdueMaxAgeDays = Math.max(overdueMaxAgeDays ?? 0, age);
-      }
-    }
-
-    // —— 未安排积压：停靠日缺失兜底 createdAt 日期 ——
-    if (v.status === "unscheduled") {
-      const parkedKey = firstScheduledDay(v) ?? v.parkedDate ?? toDateKey(new Date(v.createdAt));
-      const parkedDays = differenceInCalendarDays(fromDateKey(today), fromDateKey(parkedKey));
-      if (parkedDays >= STALE_UNSCHEDULED_MIN_DAYS) staleUnscheduledCount += 1;
-    }
-  }
-
+export function computeOverviewStats(views: TaskView[]): OverviewStats {
   return {
     total: views.length,
     totalDone: views.filter((v) => v.completedAt).length,
@@ -136,23 +22,64 @@ export function computeOverviewStats(views: TaskView[], now: Date): OverviewStat
     unscheduled: views.filter((v) => v.status === "unscheduled").length,
     // 「进行中」= 今天 + 未来安排，未安排单独成格（与筛选栏 ACTIVE_STATUSES 同口径）
     active: views.filter((v) => v.status === "today" || v.status === "upcoming").length,
-    weekCompleted,
-    monthCompleted,
-    daily,
+  };
+}
+
+/** 时间投入（概览唯一洞察块）：**自然月网格**（1 日 → 月末），按日积分各任务的开销窗口 */
+export interface MonthInvestmentStats {
+  monthKey: string; // "YYYY-MM"；缺省/非法/未来月回退当前月（复盘只能看过去）
+  dailyKeys: string[]; // 1 日 → 月末，正序（i = 日号 − 1）
+  dailyMinutes: number[]; // 各日投入分钟数（窗口 ∩ 当日 [00:00, 24:00) 毫秒积分后 floor）；未来日恒 0
+  totalMinutes: number; // 本月合计
+  avgMinutes: number; // 日均：当前月 = round(合计 / 已过天数（含今天)）；历史月 = round(合计 / 当月天数)
+  todayMinutes: number; // 今日投入（仅当前月有意义，历史月恒 0）
+}
+
+const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * 时间投入自然月网格（2026-10-10 用户决策：滚动 30 天窗口与「月底复盘」心智对不上）。
+ * 含进行中任务的当日部分（窗口终点 = now）；逾期尾巴与月外日期零贡献；跨月窗口分别落入各自月份。
+ */
+export function computeMonthInvestment(views: TaskView[], now: Date, monthKey?: string): MonthInvestmentStats {
+  const today = todayKey(now);
+  const currentMonth = today.slice(0, 7);
+  // 缺省 / 非法 / 未来月 → 回退当前月（未来无可复盘）
+  const month = !monthKey || !MONTH_KEY_PATTERN.test(monthKey) || monthKey > currentMonth ? currentMonth : monthKey;
+
+  const [year, monthNumber] = month.split("-").map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const dailyKeys = Array.from({ length: daysInMonth }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`);
+  // 各槽日的 [00:00, 24:00) 边界（本地时区，epoch 毫秒）。终点用真实次日本地零点而非固定 +24h——
+  // DST 切换日真实日长为 23/25 小时，固定偏移会让相邻桶重叠或留缝（与 taskSpendWindow 同口径）
+  const dayBounds = dailyKeys.map((key) => ({
+    start: fromDateKey(key).getTime(),
+    end: fromDateKey(addDaysKey(key, 1)).getTime(),
+  }));
+  const investMs: number[] = Array.from({ length: daysInMonth }, () => 0);
+
+  for (const v of views) {
+    // —— 时间投入：开销窗口 ∩ 各日切分累加（毫秒），最后统一 floor 成分钟 ——
+    const window = taskSpendWindow(v, now.toISOString());
+    if (!window) continue;
+    for (let i = 0; i < daysInMonth; i++) {
+      const overlap = Math.min(window.endEpoch, dayBounds[i].end) - Math.max(window.startEpoch, dayBounds[i].start);
+      if (overlap > 0) investMs[i] += overlap;
+    }
+  }
+
+  const dailyMinutes = investMs.map((ms) => Math.floor(ms / 60_000));
+  const totalMinutes = dailyMinutes.reduce((sum, m) => sum + m, 0);
+  const isCurrentMonth = month === currentMonth;
+  // 日均分母：当前月 = 已过天数（含今天，月中看才不失真）；历史月 = 当月天数（整月复盘）
+  const elapsedDays = isCurrentMonth ? Number(today.slice(8, 10)) : daysInMonth;
+
+  return {
+    monthKey: month,
     dailyKeys,
-    peak: Math.max(1, ...daily),
-    onTimeRate: onTimeJudged === 0 ? null : Math.round((onTimeCount / onTimeJudged) * 100),
-    onTimeCount,
-    onTimeJudged,
-    overdueAgeBuckets,
-    overdueMaxAgeDays,
-    staleUnscheduledCount,
-    upcomingLoadDays,
-    lastWeekCompleted,
-    weekDeltaPercent:
-      lastWeekCompleted === 0 ? null : Math.round(((weekCompleted - lastWeekCompleted) / lastWeekCompleted) * 100),
-    createdIn30,
-    netFlow30: createdIn30 - monthCompleted,
-    priorityMix,
+    dailyMinutes,
+    totalMinutes,
+    avgMinutes: Math.round(totalMinutes / Math.max(1, elapsedDays)),
+    todayMinutes: isCurrentMonth ? dailyMinutes[elapsedDays - 1] : 0,
   };
 }

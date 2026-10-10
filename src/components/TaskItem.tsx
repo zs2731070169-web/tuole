@@ -12,10 +12,11 @@
 //          styles.css 的 .task-item * { cursor: pointer !important } 强制实现，
 //          组件内勿再散落 cursor-* 工具类（会被该规则压住且徒增混乱）。
 import { forwardRef, useLayoutEffect, useRef, useState } from "react";
-import { GripVertical, CalendarClock, CalendarDays, CalendarCheck, CalendarPlus, ListTree, Pencil, ChevronDown, Check, RotateCcw, Trash2 } from "lucide-react";
+import { GripVertical, CalendarClock, CalendarDays, CalendarCheck, CalendarPlus, ListTree, Pencil, ChevronDown, Check, RotateCcw, Trash2, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TaskView } from "../shared/types";
 import { canFinish, STATUS_META, statusToneClass } from "../shared/statusMachine";
+import { computeTaskElapsed, formatTaskElapsed } from "../shared/taskElapsed";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { PriorityMark } from "./PriorityMark";
 import { SchedulePopover } from "./SchedulePopover";
@@ -54,6 +55,10 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
   const isDone = task.status === "done";
   const todoDone = task.todos.filter((s) => s.done).length;
   const hasTodos = task.todos.length > 0;
+  // 执行花费时间（纯派生，随渲染时计算、无实时跳秒）：done → 耗时；today/overdue → 已进行；
+  // 未安排/未来安排无值不渲染。日历格 chip 不展示（92px 格高预算红线）
+  const elapsed = computeTaskElapsed(task, new Date().toISOString());
+  const elapsedText = elapsed ? formatTaskElapsed(elapsed, lang) : null;
 
   return (
     <div className="task-item group/task relative min-w-0 w-full">
@@ -153,19 +158,16 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
             <p
               className={cn(
                 // min-w-0 + flex-1 是 truncate 生效的前提：否则 flex 子项 min-width:auto 不可收缩，
-                // 标题会把优先级/状态 chip 顶出内容区。
+                // 标题在窄卡片内保持单行截断，不撑宽内容区。
                 "min-w-0 flex-1 truncate text-[14px] font-medium leading-snug text-foreground",
               )}
             >
               {task.title || (zh ? "未命名任务" : "Untitled")}
             </p>
           </div>
-
-
-
-          {/* 元信息行：日期与生命周期独立，未安排/进行中/已完成始终显示同一组任务日期。 */}
-          <>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+          {/* 时间元信息行：只放日期 / 待办项 / 耗时。
+              状态、优先级、分组、标签拆到下方独立分类行，不再由宽度不足时的被动换行决定位置。 */}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
               {task.status !== "unscheduled" && task.scheduledDates.length > 0 ? (
                 <span className={cn("inline-flex items-center gap-1", task.status === "overdue" && "text-status-overdue font-medium")}>
                   {isDone ? <CalendarCheck className="size-3" /> : <CalendarClock className="size-3" />}
@@ -192,46 +194,52 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
                   {todoDone}/{task.todos.length}
                 </span>
               )}
-              {/* 优先级：与日期/待办项计数同在元信息行水平对齐（items-center），
-                  直接作行内子项渲染，勿再包 mt-N 的块级壳（会下沉错位） */}
-              {task.priority !== "none" && <PriorityMark priority={task.priority} lang={lang} />}
-              {/* 分组（2026-10-09 新增，单值归类维度）：chip 用分组确定性色档（group-tone-N），
-                  与日历里同组任务 chip 同色，互为「颜色 ↔ 分组」锚点；无分组不渲染 */}
-              {task.group && (
-                <span
-                  className={cn(
-                    "max-w-24 shrink-0 truncate rounded-full px-1.5 py-0.5 text-[11px] leading-none",
-                    groupToneClass(task.group),
-                  )}
-                >
-                  {task.group}
+              {/* 执行花费时间：日期锚点/待办项计数之后的同款元信息项；逾期红字只染日期锚点 span，
+                  耗时保持 muted（状态语义不重复上色） */}
+              {elapsedText && (
+                <span className="inline-flex items-center gap-1 tabular-nums">
+                  <Timer className="size-3" />
+                  {elapsedText}
                 </span>
               )}
-              {/* 标签：自由多值标注、纯展示性元数据（2026-10 新增）——中性色，
-                  颜色语义已归「分组」字段承担，勿给标签上色 */}
-              {task.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="max-w-24 shrink-0 truncate rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
-              {/* 状态 chip：置于优先级右侧、同一行水平对齐（产品要求，勿移回标题行）。
-                  只标跨日期语义（逾期/已完成）——「未安排」由本行的日期位文字表达，不重复放 chip；
-                  「今天/即将到来」不标（时间位置由所在栏/日期行表达）；左侧色条仍完整承载状态配色 */}
-              {(task.status === "overdue" || isDone) && (
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none",
-                    statusToneClass(task.status),
-                  )}
-                >
-                  {zh ? STATUS_META[task.status].label : task.status}
-                </span>
+          </div>
+
+          {/* 分类行（2026-10-11 用户截图定调）：固定按「状态 → 优先级 → 分组 → 标签」排列。
+              所有派生状态都渲染 chip，不再只标逾期/已完成；该行即使只有状态也稳定存在。 */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium leading-none",
+                statusToneClass(task.status),
               )}
-            </div>
-          </>
+            >
+              {zh ? STATUS_META[task.status].label : task.status}
+            </span>
+
+            {task.priority !== "none" && <PriorityMark priority={task.priority} lang={lang} />}
+
+            {/* 分组：确定性色档与日历内同组任务同色；无分组不渲染 */}
+            {task.group && (
+              <span
+                className={cn(
+                  "max-w-24 shrink-0 truncate rounded-full px-1.5 py-0.5 text-[11px] leading-none",
+                  groupToneClass(task.group),
+                )}
+              >
+                {task.group}
+              </span>
+            )}
+
+            {/* 标签：纯展示性元数据，保持中性 muted，不与分组色语义混用 */}
+            {task.tags.map((tag) => (
+              <span
+                key={tag}
+                className="max-w-24 shrink-0 truncate rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
         </div>
 
       </div>

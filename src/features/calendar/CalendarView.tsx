@@ -21,7 +21,7 @@ import { absoluteDateLabel, monthCarouselWindow, monthGrid, toDateKey, todayKey 
 import { t } from "../../lib/i18n";
 import { planDeleteDaysPrune } from "../../shared/calendar";
 import { calendarTaskOnDay, scheduledOnDay } from "../../shared/taskDates";
-import { groupToneClass } from "../../shared/groups";
+import { calendarChipTone } from "../../shared/calendarChipTone";
 
 import { useTaskStore } from "../../stores/useTaskStore";
 import { useUiStore } from "../../stores/useUiStore";
@@ -949,39 +949,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   );
 }
 
-// 已完成任务的自绘删除线：CSS line-through 的纵向位置由字体度量决定（中文字形 11px
-// 小字号下普遍偏上约 30% 高度），且无属性可调（text-underline-offset 只作用于下划线）；
-// 改用伪元素锚定行盒几何中心（top-1/2 + 上移半像素），与字体解耦。1px、半透明灰；
-// 两端缩进 6px（对齐 chip 的 px-1.5 文字边距），不贴边
-const STRIKE_LINE =
-  "relative after:pointer-events-none after:absolute after:left-1.5 after:right-1.5 after:top-1/2 after:h-px after:-translate-y-1/2 after:bg-muted-foreground/70 after:content-['']";
-
-function statusChip(status: TaskView["status"]): string {
-  switch (status) {
-    case "today":
-      return "bg-status-today/15 text-status-today";
-    case "upcoming":
-      return "bg-status-upcoming/15 text-foreground";
-    case "overdue":
-      return "bg-status-overdue/15 text-status-overdue";
-    case "done":
-      // 已完成：自绘删除线（见 STRIKE_LINE 注释）+ 淡绿底灰字
-      return cn("bg-status-done/10 text-muted-foreground/70", STRIKE_LINE);
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
-
-// 日历 chip 的分组着色（2026-10-09 用户决策：分组 = 独立单值字段，与标签解耦）：
-// 活动（today/upcoming）且有分组 → 分组名的确定性色档（group-tone-N，见 styles.css）；
-// 逾期/已完成/未安排仍走状态色——**状态语义优先于分组**（欠账红、完结绿不可被分组色淹没）。
-// 任务卡的分组 chip 用同色档作「颜色 ↔ 分组」锚点，见 TaskItem
-function calendarChipTone(task: Pick<TaskView, "group" | "status">): string {
-  if ((task.status === "today" || task.status === "upcoming") && task.group) {
-    return groupToneClass(task.group);
-  }
-  return statusChip(task.status);
-}
+// 日历 chip 的分组/状态着色（calendarChipTone / statusChip / STRIKE_LINE）已迁至
+// src/shared/calendarChipTone.ts（2026-10-10「同组同浅底」口径，tests 直接锚定）
 
 function Legend({ color, label }: { color: string; label: string }) {
   return (
