@@ -8,7 +8,7 @@ export interface WorkbenchColumns {
   unscheduled: TaskView[]; // 未安排：停靠在选中日的暂存任务 + 覆盖选中日但**尚未开始**（执行首日 > 今天）的任务
   dayList: TaskView[]; // 进行中：执行期覆盖选中日、**已开始**（执行首日 ≤ 今天）且未完成（含历史日的逾期任务）
   overdue: TaskView[]; // 逾期：执行期已结束、未完成且不覆盖选中日
-  doneOnDay: TaskView[]; // 选中日当天完成——已完成栏只收当天完成的（早于选中日完成的不展示，折叠组已按需求移除）
+  doneOnDay: TaskView[]; // 已完成且 scheduledDates 归属选中日；completedAt 只记实际完成时刻，不换日
   ahead: number; // 已排在未来（真实今天之后）的任务数
 }
 

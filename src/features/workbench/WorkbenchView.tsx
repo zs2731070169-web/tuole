@@ -4,8 +4,9 @@
 // 「逾期」不再占用主画布：顶部计数是固定入口，点击打开无蒙层右侧面板；
 // 拖动合法任务时，计数入口临时扩展为「排到昨天」的放置目标。
 // 一屏只回答四件事——还有什么没安排、选中这天要做什么、还欠着什么账、这天做完了什么。
-// 红线不变：栏内没有任何「修改状态」控件；拖入进行中栏 = 排到选中日（scheduleTo），
-//          拖入已完成栏 = 显式结束（complete），逾期任务绝不自动完成；
+// 红线不变：栏内没有任何「修改状态」控件；拖入进行中栏 = 开始未安排任务 / 重新打开已完成任务，
+//          两者都只改生命周期、保留原 scheduledDates；
+//          拖入已完成栏 = 显式结束（complete），逾期任务不自动完成、但允许用户显式结束；
 //          已完成栏受 canFinish 门禁——未安排/未来安排任务拖入无效；逾期计数入口可接收未安排/进行中任务（排到昨天成欠账）。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronDown, Inbox, X } from "lucide-react";
@@ -66,6 +67,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
   const zh = lang === "zh-CN";
   const scheduleTo = useTaskStore((s) => s.scheduleTo);
   const startTask = useTaskStore((s) => s.startTask);
+  const reopen = useTaskStore((s) => s.reopen);
   const markUnscheduled = useTaskStore((s) => s.markUnscheduled);
   const complete = useTaskStore((s) => s.complete);
   const openEditor = useUiStore((s) => s.openEditor);
@@ -79,11 +81,13 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
   // 把「试错才发现无效」变成「一眼看到能放哪」（悬停高亮 over 仍优先于预亮）
   const draggingStatus = useUiStore((s) => s.draggingStatus);
 
-  // 拖起预亮判定（与 dropHandlers 的门禁同口径）：未安排/进行中栏无门禁恒可放；已完成栏仅「今天」。
+  // 拖起预亮判定（与 dropHandlers 的门禁同口径）：进行中栏可接已完成任务重新打开；
+  // 未安排栏不接已完成（避免显示可放但 store 守卫后无变化）；已完成栏接收今天与逾期。
   // （顶部「拖入逾期」目标不再走预亮——改为选中即常驻，见 overdueEntryVisible）
   const dropTargetHint = (col: ColumnKey): "valid" | "invalid" | undefined => {
     if (!draggingStatus) return undefined;
-    if (col === "done") return draggingStatus === "today" ? "valid" : "invalid";
+    if (col === "done") return canFinish(draggingStatus) ? "valid" : "invalid";
+    if (col === "unscheduled" && draggingStatus === "done") return "invalid";
     return "valid";
   };
   // 日期锚点：进行中栏 / 已完成栏 / 进度条都围绕选中日展开，默认今天。
@@ -92,6 +96,9 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
   const workbenchDay = useUiStore((s) => s.workbenchDay);
   const isRealToday = workbenchDay === todayKey();
   const dayLabel = isRealToday ? t("board.today", lang) : formatDayLabel(workbenchDay, zh);
+  // 查看过去/未来日期时，中栏是「该日归属的任务」，其当前生命周期可能已是
+  // upcoming / overdue。只有真实今天才称「进行中」，避免栏名与卡片「逾期」状态打架。
+  const activeColumnLabel = isRealToday ? t("board.active", lang) : t("board.dayTasks", lang);
 
   // 欠账清零**不再自动收起面板**（2026-10 用户决策：对逾期任务的任何操作（改期/取消安排/删除等）
   // 退出后面板保持原样，清零时空列表给「已清零」提示，由用户自己关）。
@@ -162,7 +169,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
   const cols = useMemo(() => bucketWorkbenchColumns(views, workbenchDay), [views, workbenchDay]);
 
   // 当日完成进度：口径与屏幕逐项对账（默认今天，选其他天时统计该天）——
-  // done  = 已完成栏「当日」桶（选中日完成的任务，不论当初安排在哪天）；
+  // done  = 已完成栏「当日」桶（scheduledDates 归属选中日且已完成的任务）；
   // total = done + 进行中栏剩余（dayList）；逾期已独立成栏、不计入当天进度，
   // 因此「剩余 {n}」恒等于进行中栏可见卡片数，完成进行中栏里任何一张卡进度同步 +1。
   const dayDone = cols.doneOnDay.length;
@@ -183,13 +190,17 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
         if (overCol === col) setOverCol(null);
         return;
       }
-      // 已完成栏拒绝两类拖入：不可结束的（未安排/未来安排）与**逾期**——
-      // 产品约定：欠账只能拖入未安排/进行中改期跟进，不可直接拖入已完成；
+      // 已完成栏只拒绝不可结束的未安排/未来安排；today 与 overdue 均可结束。
+      // 这与卡片「完成」和编辑抽屉「结束任务」共用 canFinish 门禁，勿再单独排除逾期；
       // 逾期栏只接收未安排/进行中（今天/未来）任务，已逾期/已结束拖入无效。
       // 不 preventDefault 即不允许放置，光标呈禁用态且栏不高亮。
       // dragover 阶段读不到 dataTransfer，改读 ui store 里记录的拖拽状态。
       const draggingStatus = useUiStore.getState().draggingStatus;
-      if (col === "done" && draggingStatus && (!canFinish(draggingStatus) || draggingStatus === "overdue")) {
+      if (col === "unscheduled" && draggingStatus === "done") {
+        if (overCol === col) setOverCol(null);
+        return;
+      }
+      if (col === "done" && draggingStatus && !canFinish(draggingStatus)) {
         if (overCol === col) setOverCol(null);
         return;
       }
@@ -215,8 +226,13 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
       if (draggingTaskId && columnTaskIds(col)?.has(draggingTaskId)) return;
       const id = e.dataTransfer.getData("text/task-id");
       if (!id) return;
-      if (col === "today") startTask(id); // 拖入进行中只改生命周期，任务日期保持不变
-      else if (col === "overdue") {
+      if (col === "today") {
+        // 已完成 → 进行中 = 重新打开：清 completedAt/completedReason，保留原 scheduledDates；
+        // 未安排 → 进行中 = 设 startedAt。活动任务拖入则由两个 store 守卫幂等忽略。
+        const draggedTask = useTaskStore.getState().tasks.find((task) => task.id === id);
+        if (draggedTask?.completedAt) reopen(id);
+        else startTask(id);
+      } else if (col === "overdue") {
         // 门禁（防御性双保险，与 dragover 同口径）：仅未安排/今天/未来可拖入——排到昨天即成欠账
         const draggedTask = useTaskStore.getState().tasks.find((t) => t.id === id);
         const status = draggedTask ? computeAutoStatus(draggedTask, { now: new Date() }) : null;
@@ -225,11 +241,11 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
           scheduleTo(id, scheduleStartForEnd(draggedTask!, addDaysKey(todayKey(), -1)));
         }
       } else if (col === "done") {
-        // 门禁（防御性双保险，与 dragover 同口径）：未安排/未来安排不可拖入已完成——先排期、日期到了再结束；
-        // 逾期同样拒绝——欠账要走「拖入未安排/进行中」改期，显式结束请用行内「完成」按钮或编辑抽屉
+        // 门禁（防御性双保险，与 dragover 同口径）：未安排/未来安排不可拖入已完成；
+        // today / overdue 均可结束，完成只写 completedAt，日期仍归原 scheduledDates。
         const draggedTask = useTaskStore.getState().tasks.find((t) => t.id === id);
         const status = draggedTask ? computeAutoStatus(draggedTask, { now: new Date() }) : null;
-        if (status && status !== "overdue" && canFinish(status)) complete([id], "dragged");
+        if (status && canFinish(status)) complete([id], "dragged");
       } else markUnscheduled(id); // 拖回未安排只改生命周期，日期保持不变
     },
   });
@@ -351,7 +367,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
         <div className="relative ml-auto flex items-center gap-2 text-[11px] tabular-nums text-muted-foreground/80">
           <span>{t("board.unscheduled", lang)} {cols.unscheduled.length}</span>
           <span aria-hidden>·</span>
-          <span>{t("board.active", lang)} {cols.dayList.length}</span>
+          <span>{activeColumnLabel} {cols.dayList.length}</span>
           <span aria-hidden>·</span>
           {overdueTasks.length > 0 ? (
             <button
@@ -424,7 +440,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
         {/* 进行中（内容锚定顶部条选中的日期；标题固定「进行中」，具体日期由顶部筛选控件展示） */}
         <Column
           column="today"
-          title={t("board.active", lang)}
+          title={activeColumnLabel}
           count={cols.dayList.length}
           accent="bg-status-today"
           over={overCol === "today"}
@@ -441,8 +457,8 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
           )}
         </Column>
 
-        {/* 已完成：只收「完成日 = 选中日」的任务，直接平铺（无折叠组件）；
-            完成日早于选中日的不展示；过多时与其他栏一样定高内部滚动 */}
+        {/* 已完成：只收「scheduledDates 归属选中日」的已完成任务，直接平铺（无折叠组件）；
+            completedAt 只在卡片上补充「完成于…」，不把任务换到完成日。过多时与其他栏一样定高内部滚动 */}
         <Column
           column="done"
           title={t("board.done", lang)}
@@ -456,7 +472,7 @@ export function WorkbenchView({ views, overdueTasks }: { views: TaskView[]; over
           hint={t("board.dropToFinish", lang)}
         >
           {cols.doneOnDay.length === 0 ? (
-            <EmptyLine text={t("board.emptyDone", lang)} />
+            <EmptyLine text={isRealToday ? t("board.emptyDone", lang) : t("board.emptyDoneDay", lang)} />
           ) : (
             renderRows("done", cols.doneOnDay)
           )}

@@ -4,10 +4,9 @@
 // 单任务删除 = chip 与「+N 更多」浮层条目行尾 hover 显现的 🗑（2026-10-10 用户需求：单删不必
 // 进「按日期删除」三步模式，指到哪个删哪个；确认走 ConfirmDialog。**多天任务只修剪被点的那一
 // 天**——deleteTaskDay 与「按日期删除」同源语义，其余日期保留；单日/停靠/已完成才整条删除）。
-// **今天之前的格子仅查看（2026-10-10 用户决策，同日二次收紧）**：可选中、可悬停看清单、
-// 删除模式照常选日、单任务删除照常（清理历史是合法动作）；但任何点击路径都不跳工作台、
-// 不作为新建目标（新建按钮随之禁用），也不接收拖放——移动与 ⌥ 复制粘贴都不得落到过去格
-// （no-drop 反馈，同「拖到自己执行期内」）。
+// **今天之前的格子**：格内有可见任务时可照常跳工作台；仍不作为新建目标、也不接收拖放。
+// 2026-10-14 用户定调：已完成任务也可移到其他日历格，但目标日必须是今天或未来；
+// 移动后保持完成态/完成时间。删除模式选日与单任务删除照常可用。
 // 状态用颜色区分；无任何改状态操作
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { addMonths, format, isSameDay, isSameMonth } from "date-fns";
@@ -19,7 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/pop
 import type { TaskView } from "../../shared/types";
 import { absoluteDateLabel, monthCarouselWindow, monthGrid, toDateKey, todayKey } from "../../lib/date";
 import { t } from "../../lib/i18n";
-import { planDeleteDaysPrune } from "../../shared/calendar";
+import { canDropTaskOnCalendarDay, planDeleteDaysPrune } from "../../shared/calendar";
 import { calendarTaskOnDay, scheduledOnDay } from "../../shared/taskDates";
 import { calendarChipTone } from "../../shared/calendarChipTone";
 
@@ -310,8 +309,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   const currentDaySet = useMemo(() => new Set(monthGrid(anchor).map(toDateKey)), [anchor]);
   const currentOffset = carousel.currentRow * CALENDAR_ROW_STEP;
   const nextOffset = carousel.nextRow * CALENDAR_ROW_STEP;
-  // 过去日语义锚点：YYYY-MM-DD 键字典序即日期序，key < today 即「今天之前」（仅查看约束，
-  // 见文件头注释；每渲染帧取值，跨午夜与 isToday 的时效口径一致）
+  // 过去日语义锚点：YYYY-MM-DD 键字典序即日期序，key < today 即「今天之前」。
+  // 用于限制新建目标与全部任务拖放；已完成任务也不得落到过去日。
   const today = todayKey();
   const allTaskCountByDay = useMemo(() => {
     const counts = new Map<string, number>();
@@ -351,8 +350,7 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   // **多天任务 = 只删被点的那一天**（2026-10-10 用户实测反馈：29/30 是同一条任务，点 29 号
   // 整条删除把 30 号也带走了）——planDeleteDaysPrune 单任务×单日与「按日期删除」同源：多天
   // 覆盖该日 → 修剪（任务与其余日期保留，确认文案明示）；单日/未安排停靠/已完成完成日 → 整条
-  // 删除。**今天之前的格子照常可删**：过去日「仅查看」约束封的是跳转/新建/落放，删除是合法的
-  // 历史清理动作（本需求的主场景正是清理过去日任务）
+  // 删除。**今天之前的格子照常可删**：历史清理与查看过去日工作台都是合法动作。
   const deleteCalendarTask = async (task: TaskView, day: string) => {
     const fallbackTitle = lang === "zh-CN" ? "未命名任务" : "Untitled";
     const title = task.title || fallbackTitle;
@@ -527,6 +525,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   // 无效反馈与既有契约一致：dragover 不高亮、drop 不生效；落到期外 = 整段刚性平移
   const draggedTask = draggingTaskId ? views.find((v) => v.id === draggingTaskId) : undefined;
   const isDropOnOwnSpan = (dayKey: string) => !!draggedTask && scheduledOnDay(draggedTask, dayKey);
+  const isCalendarDropBlocked = (dayKey: string) =>
+    !canDropTaskOnCalendarDay(dayKey, today) || isDropOnOwnSpan(dayKey);
 
   const byDay = new Map<string, TaskView[]>();
   // 任务日期与生命周期独立：未安排任务同样直接按 scheduledDates 进格。
@@ -607,8 +607,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
           return (
             <div
               key={key}
-              // 两段式交互：第一次点击任意格 = 仅选中高亮；再次点击「当前已选中」的格子 = 跳工作台
-              // 查看该天（日历格内无任何新建/编辑弹窗）。点其他格 = 移动选中，不弹窗；
+              // 两段式交互：第一次点击任意格 = 仅选中高亮；再次点击「当前已选中」且
+              // 至少有一条可见任务的格子 = 跳工作台查看该天。空格仍可选中（新建任务要读选中日），
+              // 但无论再点多少次都不跳转。日历格内无任何新建/编辑弹窗。点其他格 = 移动选中，不弹窗；
               // 移动选中时顺带清掉遗留的任务选中态——否则原格会因 selectedIds 命中（点 chip 后）一直保持高亮
               onClick={(event) => {
                 // 点格背景显式收起「+N 更多」浮层：chip / +N 入口自带 stopPropagation 不达这里，
@@ -635,8 +636,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   return;
                 }
                 if (dayListWasOpen) return; // 这一下只用于收起本格浮层，不触发跳转
-                // 今天之前的格子仅查看：第一下选中保留（选中是查看视角），第二下不跳工作台
-                if (key < today) return;
+                // 跳转门槛按格内实际渲染的任务判定：筛选后视觉上是空格，或只有被隐藏的
+                // 空标题草稿，均不应进入一个看不到任务的工作台。
+                if (chips.length === 0) return;
                 // 再次点击已选中的格子 = 跳工作台查看该天。
                 // 原「再点新建任务 + 弹编辑抽屉」已按需求完全下线——日历不再弹出任何编辑弹窗
                 openDayInWorkbench(key);
@@ -659,10 +661,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   : undefined
               }
               onDragOver={(e) => {
-                // 今天之前的格子不接收放置（2026-10-10 用户决策：移动与 ⌥ 复制粘贴都不得落到
-                // 过去日）——不 preventDefault = 无悬停高亮、系统 no-drop 光标，与「拖到自己
-                // 执行期内」的无效反馈同款契约
-                if (deleteMode || !interactiveDay || key < today || isDropOnOwnSpan(key)) return;
+                // 所有任务（含已完成）与 ⌥ 复制均不得落过去日。
+                // 不 preventDefault = 无悬停高亮、系统 no-drop 光标，与「落到自己执行期」同款反馈。
+                if (deleteMode || !interactiveDay || isCalendarDropBlocked(key)) return;
                 e.preventDefault();
                 // ⌥ 按下 = 复制（系统光标带「+」角标），否则移动；修饰键按压会持续触发
                 // dragover，角标随按放实时切换
@@ -671,8 +672,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
               }}
               onDragLeave={() => setOverDay(null)}
               onDrop={(e) => {
-                // 同 onDragOver：过去日整格拒绝（移动 / ⌥ 复制粘贴均无效）
-                if (deleteMode || !interactiveDay || key < today || isDropOnOwnSpan(key)) return;
+                // 同 onDragOver：已完成可移到其他格，但不得落到今天之前。
+                if (deleteMode || !interactiveDay || isCalendarDropBlocked(key)) return;
                 e.preventDefault();
                 setOverDay(null);
                 // drop 落定即清拖拽态：任务换格后源卡片/源 chip 随之卸载，dragend 不再派发
@@ -691,7 +692,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   // 仅兼容迁移前的空日期数据：补到目标日，但不改「未安排」状态。
                   scheduleTo(id, key);
                 } else {
-                  // 拖入某天 = 只把「源日那一天」挪到该天，其余日期零改动（2026-10-09 用户定调，movedDay）
+                  // 拖入某天 = 只把「源日那一天」挪到该天，其余日期零改动；
+                  // 已完成任务同样只改这一天，completedAt/completedReason 原样保留。
                   moveTaskDay(id, sourceDay, key);
                 }
               }}
@@ -721,8 +723,7 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   // 标题按钮 + 行尾 hover 显现的单任务删除。chip 可拖拽到任意日历格迁移任务
                   //（2026-10-09）；点标题 = 跳到工作台查看/操作该任务（不弹编辑抽屉）。
                   // 前提：所在格已被选中（未选中时这一下只选中本格，不跳转）。
-                  // 跳转锚定日：活动任务锚定当前格日期；已结束任务锚定完成日——
-                  // 工作台已完成栏按完成日分桶，锚安排日会看不到该任务。
+                  // 跳转始终锚定当前格日期：日期与生命周期独立，已完成任务也按 scheduledDates 归日。
                   // stopPropagation 避免触发日期格自身的两段式逻辑
                   //（map 参数正名 task：旧名 t 遮蔽 i18n 的 t()，行内调文案键会类型报错）
                   <div key={task.id} {...chipDragProps(task, key)} className="group/chip flex items-center gap-0.5">
@@ -747,10 +748,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                           return;
                         }
                         if (dayListWasOpen) return; // 这一下只用于收起本格浮层，不触发跳转
-                        // 过去日的 chip 仅保留「选中本格」语义，不跳工作台（同格子两段式口径）
-                        if (key < today) return;
-                        const finishedStamp = task.completedAt;
-                        openDayInWorkbench(finishedStamp ? toDateKey(new Date(finishedStamp)) : key);
+                        // 无论生命周期都按当前日历格的 scheduledDates 归日；completedAt 不再换日。
+                        openDayInWorkbench(key);
                       }}
                       className={cn(
                         "min-w-0 flex-1 cursor-pointer truncate rounded px-1.5 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-75",
@@ -841,7 +840,7 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                       </div>
                       {/* 正文：仅溢出条目（格内已显示的前 MAX_CHIPS 条不重复列出，2026-10-09
                           用户要求）；条目可拖到任意日历格迁移任务；点条目直接跳工作台（无
-                          「先选中格子」两段式——打开浮层已是明确意图）。已结束任务锚完成日。
+                          「先选中格子」两段式——打开浮层已是明确意图）。跳转日期始终取当前格。
                           行 = group/row 容器（chipDragProps 挂容器，载荷与「只动被拖那一天」
                           契约不变）：标题按钮 + 行尾「复制」（原地克隆，拖拽归位见 store 注释） */}
                       <div className="max-h-72 space-y-1 overflow-y-auto">
@@ -855,10 +854,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                               type="button"
                               onClick={() => {
                                 setDayListDay(null);
-                                // 过去日清单条目不跳工作台：浮层本身仍是查看入口，点击只收起
-                                if (key < today) return;
-                                const finishedStamp = task.completedAt;
-                                openDayInWorkbench(finishedStamp ? toDateKey(new Date(finishedStamp)) : key);
+                                // 浮层条目与格内 chip 同口径：始终进当前日历格对应的工作台。
+                                openDayInWorkbench(key);
                               }}
                               title={task.title}
                               className={cn(

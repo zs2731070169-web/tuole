@@ -1,5 +1,5 @@
 // 任务项：HTML5 原生拖拽 + 行内操作按钮。红线——界面绝不出现「状态选择器」这类直接改状态的控件；
-//          「完成 / 重新打开」是触发状态机流转的**动作**（只写 completedAt / scheduledDate），不是状态编辑。
+//          「完成 / 重新打开」是触发状态机流转的**动作**（完成只写 completedAt，不改 scheduledDates），不是状态编辑。
 //          「完成」受 canFinish 门禁：未安排/未来安排卡片不显示该按钮——先排期、日期到了才能结束。
 // 交互约定：每张卡片行首有**常显勾选框**（批量选择的发现性入口，触屏同样可批量）；
 //          点击一级任务本身只改选中态、不弹编辑抽屉，编辑走右侧「编辑」按钮；
@@ -24,7 +24,7 @@ import { useSettingsStore } from "../stores/useSettingsStore";
 import { useUiStore } from "../stores/useUiStore";
 import { useConfirmStore } from "../stores/useConfirmStore";
 import { useTaskStore } from "../stores/useTaskStore";
-import { workbenchDateLabel, todayKey } from "../lib/date";
+import { absoluteDateLabel, toDateKey, workbenchDateLabel, todayKey } from "../lib/date";
 import { firstScheduledDay, isContiguousDays, lastScheduledDay } from "../shared/taskDates";
 import { groupToneClass } from "../shared/groups";
 import { t } from "../lib/i18n";
@@ -59,6 +59,9 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
   // 未安排/未来安排无值不渲染。日历格 chip 不展示（92px 格高预算红线）
   const elapsed = computeTaskElapsed(task, new Date().toISOString());
   const elapsedText = elapsed ? formatTaskElapsed(elapsed, lang) : null;
+  const completedDay = task.completedAt && !Number.isNaN(Date.parse(task.completedAt))
+    ? toDateKey(new Date(task.completedAt))
+    : null;
 
   return (
     <div className="task-item group/task relative min-w-0 w-full">
@@ -171,11 +174,16 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
               {task.status !== "unscheduled" && task.scheduledDates.length > 0 ? (
                 <span className={cn("inline-flex items-center gap-1", task.status === "overdue" && "text-status-overdue font-medium")}>
                   {isDone ? <CalendarCheck className="size-3" /> : <CalendarClock className="size-3" />}
+                  {isDone && <span>{t("task.scheduledAt", lang).replace(" {date}", "")}</span>}
                   {/* 连续执行期 = 首日 → 末日；分散（拖拽逐日移动产生）= 首日 + 「等 N 天」 */}
-                  {workbenchDateLabel(firstScheduledDay(task)!, lang)}
+                  {isDone
+                    ? absoluteDateLabel(firstScheduledDay(task)!, lang)
+                    : workbenchDateLabel(firstScheduledDay(task)!, lang)}
                   {isContiguousDays(task)
                     ? (lastScheduledDay(task)! !== firstScheduledDay(task)! && (
-                        <span className="tabular-nums"> → {workbenchDateLabel(lastScheduledDay(task)!, lang)}</span>
+                        <span className="tabular-nums"> → {isDone
+                          ? absoluteDateLabel(lastScheduledDay(task)!, lang)
+                          : workbenchDateLabel(lastScheduledDay(task)!, lang)}</span>
                       ))
                     : (task.scheduledDates.length > 1 && (
                         <span className="tabular-nums"> {zh ? `等 ${task.scheduledDates.length} 天` : `· ${task.scheduledDates.length} days`}</span>
@@ -186,6 +194,13 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
                   {t("board.unscheduled", lang)}
                   <span aria-hidden>·</span>
                   {workbenchDateLabel(firstScheduledDay(task) ?? task.parkedDate ?? todayKey(), lang)}
+                </span>
+              )}
+              {/* 完成日只是生命周期记录，不改变任务所属日。已完成卡同时展示
+                  「安排于… · 完成于…」，明示逾期后完成而不把任务换日。 */}
+              {isDone && completedDay && (
+                <span className="inline-flex items-center gap-1 tabular-nums before:content-['·']">
+                  {t("task.completedAt", lang).replace("{date}", absoluteDateLabel(completedDay, lang))}
                 </span>
               )}
               {hasTodos && (
@@ -254,7 +269,7 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
       <div className="mt-1 hidden flex-wrap items-center justify-end gap-1 group-hover/task:flex group-focus-within/task:flex max-[640px]:flex">
         {isDone ? (
           <RowButton
-            label={zh ? "重新打开（排到今天）" : "Reopen (schedule for today)"}
+            label={zh ? "重新打开（保留原安排日期）" : "Reopen (keep scheduled dates)"}
             onClick={() => reopen(task.id)}
           >
             <RotateCcw className="size-4" />
@@ -262,9 +277,8 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
           </RowButton>
         ) : (
           <>
-            {/* 完成是可结束任务的第一操作；未安排/未来安排/逾期任务不显示——
-                逾期卡以「改期跟进」为第一动作（四个改期入口在卡片下方常驻行，完成走编辑抽屉），
-                未安排/未来必须先排期 */}
+            {/* 完成是可结束任务的第一操作；未安排/未来安排不显示——必须先排期。
+                逾期任务也可结束，但它的操作一律放在下方常驻行，避免这里再出现一个重复的「完成」。 */}
             {canFinish(task.status) && task.status !== "overdue" && (
               <RowButton
                 label={zh ? "完成" : "Complete"}
@@ -350,16 +364,22 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
         </RowButton>
       </div>
 
-      {/* 逾期任务专属：卡片下方常驻一行改期动作（2026-10 用户要求——完成不再上工具条，
-          改期跟进是逾期的第一动作，四个入口平铺常显、不依赖 hover，触屏同样可达；
-          WorkbenchView 逾期面板不再叠加额外按钮行）：
+      {/* 逾期任务专属：卡片下方常驻一行结束/跟进动作（2026-10-12 用户决策）。
+          最终动作集 = 完成 / 提到今天 / 改期 / 取消安排；「顺延」与前两种改期路径重叠，从逾期卡移除。
+          常驻行不依赖 hover，触屏同样可达；WorkbenchView 逾期面板不再叠加额外按钮行：
+          完成 = 只写 completedAt，保留原 scheduledDates，任务因此进原所属日的已完成栏；
           提到今天 = 排到今天（回「进行中」栏）；
           改期 = SchedulePopover 选任意日期（唯一带日期弹层的行内流转按钮）；
-          顺延 = rollOver 到设置的目标日；取消安排 = 清除排期回「未安排」。
-          （不放「安排」：排到选中日与提到今天语义重叠、任意日走改期，2026-10 用户判定冗余）
-          显式结束走编辑抽屉「结束任务」 */}
+          取消安排 = 清除排期回「未安排」。 */}
       {task.status === "overdue" && (
         <div className="mt-1 flex flex-wrap items-center gap-1">
+          <RowButton
+            label={zh ? "完成" : "Complete"}
+            className="text-status-done hover:border-status-done/30 hover:bg-status-done/15 hover:text-status-done"
+            onClick={() => complete([task.id], "manual")}
+          >
+            <span>{zh ? "完成" : "Complete"}</span>
+          </RowButton>
           <RowButton
             label={zh ? "提到今天（排到今天后即可完成）" : "Bring to today (then finishable)"}
             onClick={() => scheduleTo(task.id, todayKey())}
@@ -380,12 +400,6 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
               <span>{t("action.reschedule", lang)}</span>
             </RowButton>
           </SchedulePopover>
-          <RowButton
-            label={zh ? "顺延（按设置的目标日改期）" : "Roll over to the configured target day"}
-            onClick={() => rollOver([task.id])}
-          >
-            <span>{zh ? "顺延" : "Later"}</span>
-          </RowButton>
           <RowButton
             label={zh ? "取消安排（清除排期，回到未安排）" : "Unschedule (clear the date)"}
             onClick={() => scheduleTo(task.id, null)}

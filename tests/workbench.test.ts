@@ -130,6 +130,24 @@ describe("栏内排序（sortOrder + store.reorder 协同）", () => {
     expect(cols.doneOnDay.map((v) => v.id)).toEqual([c.id, d.id]);
   });
 
+  it("逾期任务完成后保留原安排日，进原所属日的已完成栏", () => {
+    const scheduledDates = ["2026-10-11"];
+    useTaskStore.setState({
+      tasks: [{ ...baseTask("late-done"), scheduledDates, startedAt: "2026-10-11T08:00:00.000Z" }],
+    });
+
+    useTaskStore.getState().complete(["late-done"], "manual");
+
+    const stored = useTaskStore.getState().tasks[0];
+    expect(stored.scheduledDates).toEqual(scheduledDates);
+    expect(stored.completedAt).toBeTruthy();
+    expect(stored.completedReason).toBe("manual");
+
+    const cols = bucketWorkbenchColumns(useTaskStore.getState().views(), "2026-10-11", "2026-10-12");
+    expect(cols.dayList).toEqual([]);
+    expect(cols.doneOnDay.map((task) => task.id)).toEqual(["late-done"]);
+  });
+
   it("reorder 重写栏内 sortOrder 后，重新分桶得到新顺序（栏内拖拽排序的落库闭环）", () => {
     // 状态由 computeAutoStatus 按真实「今天」派生——用 todayKey() 保证任何运行日期下都是进行中态
     const day = todayKey();

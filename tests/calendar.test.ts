@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { planDeleteDaysPrune } from "../src/shared/calendar";
+import { canDropTaskOnCalendarDay, planDeleteDaysPrune } from "../src/shared/calendar";
 import { useCalendarStore } from "../src/stores/useCalendarStore";
 import { useTaskStore, emptyTask } from "../src/stores/useTaskStore";
 import { todayKey } from "../src/lib/date";
 
 const OCT5_9 = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"];
+
+describe("canDropTaskOnCalendarDay 过去日拖放门禁", () => {
+  const today = "2026-10-14";
+
+  it("已完成与普通任务共用边界：过去日禁止，今天/未来日允许", () => {
+    expect(canDropTaskOnCalendarDay("2026-10-11", today)).toBe(false);
+    expect(canDropTaskOnCalendarDay(today, today)).toBe(true);
+    expect(canDropTaskOnCalendarDay("2026-10-20", today)).toBe(true);
+  });
+});
 
 describe("planDeleteDaysPrune 按日修剪（2026-10-10 用户决策：删一天只移除那一天）", () => {
   it("多天任务删其中一天：只修剪该日，任务保留、其余日期不动", () => {

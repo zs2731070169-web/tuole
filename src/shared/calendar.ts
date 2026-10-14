@@ -2,6 +2,15 @@
 // 刻意接收原始 tasks 而非筛选后的 TaskView，确保删除范围不受当前搜索/状态/日期筛选影响。
 import type { Task } from "./types";
 
+/**
+ * 日历格拖放的日期门禁（2026-10-14 用户定调）：
+ * 任何生命周期（包含已完成）都可移动到今天或未来的其他格，但不能落到今天之前。
+ * ⌥ 复制与普通移动共用这条日期边界。
+ */
+export function canDropTaskOnCalendarDay(targetDay: string, today: string): boolean {
+  return targetDay >= today;
+}
+
 export interface DayPrunePlan {
   // 整条删除的任务 id：所属日期全部被选中（含历史空日期停靠任务）
   deleteIds: string[];

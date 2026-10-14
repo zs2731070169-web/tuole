@@ -164,6 +164,28 @@ describe("moveTaskDay store 集成（日历拖拽落点全链路）", () => {
     });
   });
 
+  it("已完成任务重新打开：清完成记录、保留原安排日期与已开始标记", () => {
+    const scheduledDates = ["2026-10-11"];
+    const base = emptyTask({
+      id: "reopen-done",
+      title: "重新打开我",
+      scheduledDates,
+      startedAt: "2026-10-11T08:00:00.000Z",
+      completedAt: "2026-10-12T09:00:00.000Z",
+      completedReason: "manual",
+    });
+    useTaskStore.setState({ tasks: [base] });
+
+    useTaskStore.getState().reopen(base.id);
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      scheduledDates,
+      startedAt: "2026-10-11T08:00:00.000Z",
+      completedAt: null,
+      completedReason: null,
+    });
+  });
+
   it("无效源日 = 真无操作：不得侧写清停靠日（未安排 chip 拖到哪都瞬移进今天格的根因）", () => {
     // 未安排任务的 chip 停靠在 8 号格（scheduledDates 为空，源日=停靠日不在集合内）。
     // 旧实现 movedDay 原样返回集合、但副作用照落：parkedDate 被清成 null 后
@@ -189,6 +211,26 @@ describe("moveTaskDay store 集成（日历拖拽落点全链路）", () => {
     // 拖它今天格（完成日 9 号）的 chip：9 号不在执行期内，旧实现会静默重开该任务
     useTaskStore.getState().moveTaskDay("done-late", "2026-10-09", "2026-10-20");
     expect(useTaskStore.getState().tasks[0]).toBe(before);
+  });
+
+  it("已完成任务移到其他日历格：只移源日，完成态与完成时间保持", () => {
+    const done = emptyTask({
+      id: "done-move-day",
+      title: "调整归属日",
+      scheduledDates: ["2026-10-10", "2026-10-11"],
+      startedAt: "2026-10-10T08:00:00.000Z",
+      completedAt: "2026-10-12T09:00:00.000Z",
+      completedReason: "manual",
+    });
+    useTaskStore.setState({ tasks: [done] });
+
+    useTaskStore.getState().moveTaskDay(done.id, "2026-10-11", "2026-10-13");
+
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      scheduledDates: ["2026-10-10", "2026-10-13"],
+      completedAt: "2026-10-12T09:00:00.000Z",
+      completedReason: "manual",
+    });
   });
 });
 

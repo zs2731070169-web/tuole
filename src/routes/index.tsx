@@ -10,7 +10,6 @@ import { useFilterStore } from "../stores/useFilterStore";
 import { useUiStore } from "../stores/useUiStore";
 import { useCalendarStore } from "../stores/useCalendarStore";
 import { applyFilters } from "../shared/filter";
-import { bucketWorkbenchColumns } from "../shared/workbench";
 import { computeOverviewStats } from "../shared/overviewStats";
 import { toDateKey } from "../lib/date";
 import { computeAutoStatus } from "../shared/statusMachine";
@@ -118,13 +117,14 @@ function App() {
   }, [editingId, tasks]);
 
   const calendarAnchor = useCalendarStore((s) => s.anchor);
-  const workbenchDay = useUiStore((s) => s.workbenchDay);
   // 逾期面板是工作台的常驻获取入口，不应因当前状态筛选切到「已完成」等而消失；
-  // 仍遵守搜索与优先级条件，并复用工作台分桶排除已在选中日进行中栏里的任务。
+  // 仍遵守搜索与优先级条件。计数与面板表达「全部当前逾期」：即使某任务同时因
+  // scheduledDates 属于选中日、已显示在「当日任务」，也不能再把它从逾期计数剔除——
+  // 否则会出现卡片标「逾期」、顶部却显示「逾期 0」的自相矛盾。
   const workbenchOverdueTasks = useMemo(() => {
     const withoutStatus = applyFilters(views, { ...filter, status: "all", dateFrom: null, dateTo: null });
-    return bucketWorkbenchColumns(withoutStatus, workbenchDay).overdue;
-  }, [views, filter, workbenchDay]);
+    return withoutStatus.filter((task) => task.status === "overdue").sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [views, filter]);
   // 状态筛选栏只在日历渲染（2026-10 用户决策：概览已移除筛选栏与工具行、工作台本就无此栏），
   // 计数口径 = 当前展示月。未安排任务同样有 scheduledDates，直接按所属月计数。
   const countViews = useMemo(() => {
