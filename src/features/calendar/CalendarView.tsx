@@ -18,7 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "../../components/ui/pop
 import type { TaskView } from "../../shared/types";
 import { absoluteDateLabel, monthCarouselWindow, monthGrid, toDateKey, todayKey } from "../../lib/date";
 import { t } from "../../lib/i18n";
-import { canDropTaskOnCalendarDay, planDeleteDaysPrune } from "../../shared/calendar";
+import { canDropTaskOnCalendarDay, canOpenCalendarDay, planDeleteDaysPrune } from "../../shared/calendar";
 import { calendarTaskOnDay, scheduledOnDay } from "../../shared/taskDates";
 import { calendarChipTone } from "../../shared/calendarChipTone";
 
@@ -608,8 +608,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
             <div
               key={key}
               // 两段式交互：第一次点击任意格 = 仅选中高亮；再次点击「当前已选中」且
-              // 至少有一条可见任务的格子 = 跳工作台查看该天。空格仍可选中（新建任务要读选中日），
-              // 但无论再点多少次都不跳转。日历格内无任何新建/编辑弹窗。点其他格 = 移动选中，不弹窗；
+              // 有可见任务或日期晚于今天的格子 = 跳工作台查看该天。今天与过去的空格仍可选中
+              //（新建任务要读选中日），但无论再点多少次都不跳转。日历格内无任何新建/编辑弹窗。
+              // 点其他格 = 移动选中，不弹窗；
               // 移动选中时顺带清掉遗留的任务选中态——否则原格会因 selectedIds 命中（点 chip 后）一直保持高亮
               onClick={(event) => {
                 // 点格背景显式收起「+N 更多」浮层：chip / +N 入口自带 stopPropagation 不达这里，
@@ -636,9 +637,9 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   return;
                 }
                 if (dayListWasOpen) return; // 这一下只用于收起本格浮层，不触发跳转
-                // 跳转门槛按格内实际渲染的任务判定：筛选后视觉上是空格，或只有被隐藏的
-                // 空标题草稿，均不应进入一个看不到任务的工作台。
-                if (chips.length === 0) return;
+                // 跳转门槛：格内有实际渲染的任务，或日期晚于今天。今天与过去的空格禁止进入；
+                // 因筛选而视觉为空，或只有被隐藏空标题草稿，同样按空格处理。
+                if (!canOpenCalendarDay(key, today, chips.length)) return;
                 // 再次点击已选中的格子 = 跳工作台查看该天。
                 // 原「再点新建任务 + 弹编辑抽屉」已按需求完全下线——日历不再弹出任何编辑弹窗
                 openDayInWorkbench(key);

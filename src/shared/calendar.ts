@@ -3,6 +3,16 @@
 import type { Task } from "./types";
 
 /**
+ * 日历格进入工作台的门禁：
+ * - 格内有可见任务时允许进入，不受日期限制；
+ * - 今天之后的日期即使暂时没有任务也允许进入；
+ * - 今天及过去日期的空格禁止进入。
+ */
+export function canOpenCalendarDay(day: string, today: string, visibleTaskCount: number): boolean {
+  return visibleTaskCount > 0 || day > today;
+}
+
+/**
  * 日历格拖放的日期门禁（2026-10-14 用户定调）：
  * 任何生命周期（包含已完成）都可移动到今天或未来的其他格，但不能落到今天之前。
  * ⌥ 复制与普通移动共用这条日期边界。

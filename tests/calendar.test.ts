@@ -1,10 +1,26 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { canDropTaskOnCalendarDay, planDeleteDaysPrune } from "../src/shared/calendar";
+import { canDropTaskOnCalendarDay, canOpenCalendarDay, planDeleteDaysPrune } from "../src/shared/calendar";
 import { useCalendarStore } from "../src/stores/useCalendarStore";
 import { useTaskStore, emptyTask } from "../src/stores/useTaskStore";
 import { todayKey } from "../src/lib/date";
 
 const OCT5_9 = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"];
+
+describe("canOpenCalendarDay 日历格进入工作台门禁", () => {
+  const today = "2026-10-15";
+
+  it("任何日期只要有任务就允许进入", () => {
+    expect(canOpenCalendarDay("2026-10-14", today, 1)).toBe(true);
+    expect(canOpenCalendarDay(today, today, 1)).toBe(true);
+    expect(canOpenCalendarDay("2026-10-16", today, 1)).toBe(true);
+  });
+
+  it("空格仅在今天之后允许进入", () => {
+    expect(canOpenCalendarDay("2026-10-14", today, 0)).toBe(false);
+    expect(canOpenCalendarDay(today, today, 0)).toBe(false);
+    expect(canOpenCalendarDay("2026-10-16", today, 0)).toBe(true);
+  });
+});
 
 describe("canDropTaskOnCalendarDay 过去日拖放门禁", () => {
   const today = "2026-10-14";
