@@ -59,6 +59,9 @@ export function TaskEditor({ task }: { task: TaskView }) {
   const [priority, setPriority] = useState<Priority>(task.priority);
   const [scheduledDates, setScheduledDates] = useState<string[]>(task.scheduledDates);
   const [todos, setTodos] = useState<Todo[]>(task.todos);
+  // 已完成任务的待办项展示一律视为已完成（2026-10-17 用户决策，与任务行 TodoPanel/计数
+  // 同口径）：buffer 仍存真实 done——编辑器不提供勾选、保存不回写，仅行首圆点与徽标派生展示
+  const taskCompleted = task.status === "done";
   const [todoDraft, setTodoDraft] = useState("");
   // 待办项拖拽排序（2026-10-10 用户需求）：拖拽源 id 与插入指示位，只在本地缓冲数组上重排，
   // 随「保存」整段落库（Task.todos 数组序即展示序，落库链路零改动）。dragover 阶段读不到
@@ -508,7 +511,7 @@ export function TaskEditor({ task }: { task: TaskView }) {
                     <span
                       className={cn(
                         "size-1.5 shrink-0 rounded-full",
-                        s.done ? "bg-status-done" : "bg-muted-foreground/40",
+                        s.done || taskCompleted ? "bg-status-done" : "bg-muted-foreground/40",
                       )}
                       aria-hidden
                     />
@@ -523,7 +526,7 @@ export function TaskEditor({ task }: { task: TaskView }) {
                       aria-label={t("editor.todoTitleAria", lang)}
                     />
                     <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                      {s.done ? (lang === "zh-CN" ? "已完成" : "Done") : ""}
+                      {s.done || taskCompleted ? (lang === "zh-CN" ? "已完成" : "Done") : ""}
                     </span>
                     <button
                       onClick={() => setTodos((cur) => cur.filter((x) => x.id !== s.id))}
@@ -554,7 +557,9 @@ export function TaskEditor({ task }: { task: TaskView }) {
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                {t("editor.todoTickHint", lang)}
+                {/* 已完成任务的待办项勾选入口已锁定（展示一律已勾选，2026-10-17）：
+                    原提示的「去任务行勾选」分句不可达，只保留拖拽排序分句 */}
+                {t(taskCompleted ? "editor.todoDragHint" : "editor.todoTickHint", lang)}
               </p>
             </div>
           </Field>

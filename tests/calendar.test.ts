@@ -30,6 +30,22 @@ describe("canDropTaskOnCalendarDay 过去日拖放门禁", () => {
     expect(canDropTaskOnCalendarDay(today, today)).toBe(true);
     expect(canDropTaskOnCalendarDay("2026-10-20", today)).toBe(true);
   });
+
+  it("2026-10-17 例外：今天格拖出的任务可落到「有任务」的过去格（移动与 ⌥ 复制共用）", () => {
+    expect(canDropTaskOnCalendarDay("2026-10-12", today, today, 1)).toBe(true);
+  });
+
+  it("空的过去格仍拒绝；非今天格拖出的任务（其他过去格/未来格/源日缺失）仍拒绝", () => {
+    expect(canDropTaskOnCalendarDay("2026-10-12", today, today, 0)).toBe(false);
+    expect(canDropTaskOnCalendarDay("2026-10-12", today, "2026-10-12", 1)).toBe(false);
+    expect(canDropTaskOnCalendarDay("2026-10-12", today, "2026-10-16", 1)).toBe(false);
+    expect(canDropTaskOnCalendarDay("2026-10-12", today, null, 1)).toBe(false);
+  });
+
+  it("今天/未来格不受源日与目标格任务数影响（既有边界不变）", () => {
+    expect(canDropTaskOnCalendarDay(today, today, null, 0)).toBe(true);
+    expect(canDropTaskOnCalendarDay("2026-10-20", today, "2026-10-11", 0)).toBe(true);
+  });
 });
 
 describe("planDeleteDaysPrune 按日修剪（2026-10-10 用户决策：删一天只移除那一天）", () => {

@@ -26,6 +26,7 @@ import { useConfirmStore } from "../stores/useConfirmStore";
 import { useTaskStore } from "../stores/useTaskStore";
 import { absoluteDateLabel, toDateKey, workbenchDateLabel, todayKey } from "../lib/date";
 import { firstScheduledDay, isContiguousDays, lastScheduledDay } from "../shared/taskDates";
+import { todosForDisplay } from "../shared/todos";
 import { groupToneClass } from "../shared/groups";
 import { t } from "../lib/i18n";
 
@@ -53,7 +54,9 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
   const [dragging, setDragging] = useState(false);
 
   const isDone = task.status === "done";
-  const todoDone = task.todos.filter((s) => s.done).length;
+  // 已完成任务的待办项一律按已勾选口径计数（n/m 恒满格，2026-10-17 用户决策）；
+  // 展示派生不回写存储，重新打开任务即回到真实勾选进度
+  const todoDone = todosForDisplay(task.todos, isDone).filter((s) => s.done).length;
   const hasTodos = task.todos.length > 0;
   // 执行花费时间（纯派生，随渲染时计算、无实时跳秒）：done → 耗时；today/overdue → 已进行；
   // 未安排/未来安排无值不渲染。日历格 chip 不展示（92px 格高预算红线）
@@ -412,11 +415,14 @@ export function TaskItem({ task, selected, onOpen, onToggleSelect }: Props) {
   );
 }
 
-// 待办项面板（2026-10 由「子任务」更名，内部组件名沿用历史契约）：勾选动作发生在这里（编辑抽屉内不再提供勾选）
+// 待办项面板（2026-10 由「子任务」更名，内部组件名沿用历史契约）：勾选动作发生在这里（编辑抽屉内不再提供勾选）。
+// 已完成任务的待办项按派生视图渲染（一律已勾选，2026-10-17）且勾选锁定——store toggleTodo 同口径防御
 function TodoPanel({ task }: { task: TaskView }) {
   const lang = useSettingsStore((s) => s.settings.language);
   const zh = lang === "zh-CN";
   const toggleTodo = useTaskStore((s) => s.toggleTodo);
+  const locked = task.status === "done";
+  const rows = todosForDisplay(task.todos, locked);
 
   return (
     // 悬停 0.5s 弹完整内容气泡：skipDelayDuration=0 保证每一项都完整等 0.5s（连扫列表不连环弹）；
@@ -426,8 +432,8 @@ function TodoPanel({ task }: { task: TaskView }) {
         className="space-y-0.5 rounded-b-xl border border-t-0 border-border/60 bg-muted/25 px-3 py-2"
         aria-label={t("todos.listAria", lang)}
       >
-        {task.todos.map((s) => (
-          <TodoRow key={s.id} task={task} todo={s} zh={zh} onToggle={toggleTodo} />
+        {rows.map((s) => (
+          <TodoRow key={s.id} task={task} todo={s} zh={zh} onToggle={toggleTodo} locked={locked} />
         ))}
       </ul>
     </TooltipProvider>
@@ -442,11 +448,14 @@ function TodoRow({
   todo,
   zh,
   onToggle,
+  locked,
 }: {
   task: TaskView;
   todo: TaskView["todos"][number];
   zh: boolean;
   onToggle: (taskId: string, todoId: string) => void;
+  // 已完成任务的勾选锁定：todo 已是派生视图（恒已勾选），允许点击会写脏真实进度且视觉无反馈
+  locked: boolean;
 }) {
   const textRef = useRef<HTMLSpanElement | null>(null);
   const [truncated, setTruncated] = useState(false);
@@ -461,6 +470,7 @@ function TodoRow({
     <li className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-muted/60">
       <button
         type="button"
+        disabled={locked}
         onClick={() => onToggle(task.id, todo.id)}
         aria-label={todo.done ? (zh ? "标记未完成" : "Mark undone") : zh ? "标记完成" : "Mark done"}
         aria-pressed={todo.done}

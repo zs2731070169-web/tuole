@@ -250,10 +250,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
   // 日历格拖拽落点（2026-10-09 用户定调）：把 fromDay 那一天挪到 toDay，其余日期零改动
   moveTaskDay: (id, fromDay, toDay) => {
-    // 落点语义见 shared/taskDates.movedDay；与 scheduleTo 同款副作用：改期即重开（清完成态）、
-    // 停靠日由执行期接管。**源日不在集合内 = 真无操作（不 set / 不 persist）**：无操作却照落
-    // 副作用会把停靠日/完成态清掉——未安排 chip（空集合）拖放后 byDay 的「parkedDate ?? 今天」
-    // 兜底会让它瞬移进今天格（2026-10-10 用户实测「拖到哪都跑进今日格子」的根因）
+    // 落点语义见 shared/taskDates.movedDay；只改日期与停靠日（parkedDate 置空由执行期接管），
+    // 不改生命周期：completedAt/completedReason/startedAt 原样保留（2026-10-10 日期与生命
+    // 周期解耦定调——已完成任务移格保持完成态）。**源日不在集合内 = 真无操作（不 set /
+    // 不 persist）**：无操作却照落副作用会把停靠日清掉——未安排 chip（空集合）拖放后 byDay
+    // 的「parkedDate ?? 今天」兜底会让它瞬移进今天格（2026-10-10 用户实测「拖到哪都跑进今日格子」的根因）
     const task = get().tasks.find((t) => t.id === id);
     if (!task || !task.scheduledDates.includes(fromDay)) return;
     set({
@@ -319,6 +320,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     get().persist();
   },
   toggleTodo: (taskId, todoId) => {
+    // 已完成任务的待办项勾选锁定（2026-10-17 用户决策「已完成待办项全默认打勾」的写路径
+    // 防御）：展示层一律派生为已勾选，此处拒绝改写真实勾选进度——真无操作（不 set /
+    // 不 persist），重新打开任务后才能继续勾选。UI 侧勾选按钮同口径 disabled
+    const task = get().tasks.find((item) => item.id === taskId);
+    if (!task || task.completedAt) return;
     set({
       tasks: get().tasks.map((t) =>
         t.id === taskId ? { ...t, todos: t.todos.map((item) => (item.id === todoId ? { ...item, done: !item.done } : item)) } : t,

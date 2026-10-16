@@ -104,6 +104,8 @@ const DICT = {
   // 拖拽手柄（2026-10-10 用户需求：待办项前后顺序可拖拽调整，编辑抽屉内全缓冲重排）
   "editor.todoDragHandle": { zh: "拖拽调整顺序", en: "Drag to reorder" },
   "editor.todoTickHint": { zh: "勾选完成请在任务列表展开该任务的待办项面板进行；拖动行首手柄可调整顺序。", en: "Tick to-dos from the task row's to-do panel; drag the leading handle to reorder." },
+  // 已完成任务的待办项勾选已锁定（2026-10-17 展示派生口径）：只保留仍有效的拖拽分句，勿指向已锁死入口
+  "editor.todoDragHint": { zh: "拖动行首手柄可调整顺序。", en: "Drag the leading handle to reorder." },
   "todos.listAria": { zh: "待办项清单", en: "To-dos" },
   "field.scheduled": { zh: "安排日期", en: "Scheduled" },
   "field.taskPeriod": { zh: "执行时间", en: "Task period" },

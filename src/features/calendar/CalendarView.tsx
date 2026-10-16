@@ -4,8 +4,9 @@
 // 单任务删除 = chip 与「+N 更多」浮层条目行尾 hover 显现的 🗑（2026-10-10 用户需求：单删不必
 // 进「按日期删除」三步模式，指到哪个删哪个；确认走 ConfirmDialog。**多天任务只修剪被点的那一
 // 天**——deleteTaskDay 与「按日期删除」同源语义，其余日期保留；单日/停靠/已完成才整条删除）。
-// **今天之前的格子**：格内有可见任务时可照常跳工作台；仍不作为新建目标、也不接收拖放。
-// 2026-10-14 用户定调：已完成任务也可移到其他日历格，但目标日必须是今天或未来；
+// **今天之前的格子**：格内有可见任务时可照常跳工作台；仍不作为新建目标；拖放仅一条定向
+// 例外（2026-10-17）：今天格拖出的任务可落到「本身有任务」的过去格，空的过去格仍不接收。
+// 2026-10-14 用户定调：已完成任务也可移到其他日历格（目标日今天/未来，或上述例外路径），
 // 移动后保持完成态/完成时间。删除模式选日与单任务删除照常可用。
 // 状态用颜色区分；无任何改状态操作
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -266,11 +267,18 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   // 组件卸载（含视图切换）时清掉挂着的关闭定时器
   useEffect(() => () => cancelDayListClose(), []);
 
+  // 拖拽源日（chip 所在格）：dragover 阶段读不到 dataTransfer 的 text/task-source-day，
+  // 「今天格拖出的任务可落到有任务的过去格」（2026-10-17 用户决策）需要在 dragover 时
+  // 判定源日；仅日历格消费，故走组件 ref 而非 ui store（draggingStatus/draggingTaskId
+  // 入 store 是因为工作台栏等跨组件消费，本字段不满足该理由）
+  const draggingSourceDayRef = useRef<string | null>(null);
+
   // 任务 chip 的拖拽武装（2026-10-09 用户需求：格内 chip 与「+N 更多」浮层条目可拖到任意
   // 日历格快速迁移）。静息 draggable=false、按下才武装（Chromium 常驻 draggable 会反复进入
   // 原生拖拽候选态闪光标——TaskItem 同款教训），pointerup/cancel/dragend 复位；dragstart 写入
   // 与 TaskItem 相同的拖拽载荷（text/task-id + draggingStatus/draggingTaskId），格子既有的
-  // onDrop 契约（清拖拽态不变，落库改走 rescheduleSpanToDay）复用。删除模式不武装（chip 点击 = 选日）
+  // onDrop 契约（清拖拽态不变；落库三分流 ⌥复制 duplicateTaskToDay / 逐日移动 moveTaskDay /
+  // 空集合兜底 scheduleTo）复用。删除模式不武装（chip 点击 = 选日）
   const chipDragProps = (task: TaskView, sourceDay: string) => ({
     "data-calendar-chip": "" as const,
     draggable: false,
@@ -288,6 +296,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
       e.dataTransfer.setData("text/task-id", task.id);
       // 源日随载荷传递：drop 侧「只动被拖那一天」需要知道挪的是哪一天（2026-10-09 模型改造）
       e.dataTransfer.setData("text/task-source-day", sourceDay);
+      // 组件内镜像同一份源日：dragover 门禁（今天格 → 有任务的过去格）要用它
+      draggingSourceDayRef.current = sourceDay;
       // copyMove 而非 move：⌥(Alt)+拖 = 复制（2026-10-10 用户决策）——dragover 需要被允许
       // 设 dropEffect="copy"，系统光标才会显示复制「+」角标；是否按 ⌥ 在 drop 时刻判定
       e.dataTransfer.effectAllowed = "copyMove";
@@ -298,6 +308,7 @@ export function CalendarView({ views }: { views: TaskView[] }) {
       // 兜底清拖拽态（drop 目标侧也会显式清）；拖拽后鼠标不在浮层内、mouseleave 定时器
       // 不会自然触发，这里顺带收起「+N 更多」浮层
       e.currentTarget.draggable = false;
+      draggingSourceDayRef.current = null;
       useUiStore.getState().setDraggingStatus(null);
       useUiStore.getState().setDraggingTaskId(null);
       setDayListDay(null);
@@ -310,7 +321,8 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   const currentOffset = carousel.currentRow * CALENDAR_ROW_STEP;
   const nextOffset = carousel.nextRow * CALENDAR_ROW_STEP;
   // 过去日语义锚点：YYYY-MM-DD 键字典序即日期序，key < today 即「今天之前」。
-  // 用于限制新建目标与全部任务拖放；已完成任务也不得落到过去日。
+  // 用于限制新建目标与过去日拖放边界（仅「今天格拖出 + 目标格有任务」放行，任何生命周期
+  // 含已完成同口径，见 canDropTaskOnCalendarDay）。
   const today = todayKey();
   const allTaskCountByDay = useMemo(() => {
     const counts = new Map<string, number>();
@@ -520,13 +532,17 @@ export function CalendarView({ views }: { views: TaskView[] }) {
   };
 
   // 拖拽落点合法性：拖拽中的任务若已覆盖目标日（多天任务的 chip 拖到自己执行期内的
-  // 某一天）= 无效放置——否则 scheduleTo 会把整段跨度平移到该天，表现为「同一天重复
-  // 放了任务、其他格子里的同名任务被改动」（2026-10-09 用户反馈两个 bug 的同根因）。
-  // 无效反馈与既有契约一致：dragover 不高亮、drop 不生效；落到期外 = 整段刚性平移
+  // 某一天）= 无效放置——不拦的话 movedDay 会移除源日而目标日已在集合内，净效果是任务
+  // 静默少一天（2026-10-09 用户反馈「同一天重复放任务/其他格子同名任务被改动」时落库还是
+  // scheduleTo 整段平移，拦截契约沿用至今、失败模式随落库语义演进为逐日移动）。
+  // 无效反馈与既有契约一致：dragover 不高亮、drop 不生效。
+  // 过去日边界见 canDropTaskOnCalendarDay：仅「今天格拖出 + 目标格有可见任务」放开（2026-10-17），
+  // 目标格任务数与 canOpenCalendarDay 同源（chips = 筛选后可见、空标题草稿除外）
   const draggedTask = draggingTaskId ? views.find((v) => v.id === draggingTaskId) : undefined;
   const isDropOnOwnSpan = (dayKey: string) => !!draggedTask && scheduledOnDay(draggedTask, dayKey);
-  const isCalendarDropBlocked = (dayKey: string) =>
-    !canDropTaskOnCalendarDay(dayKey, today) || isDropOnOwnSpan(dayKey);
+  const isCalendarDropBlocked = (dayKey: string, visibleTaskCount: number) =>
+    !canDropTaskOnCalendarDay(dayKey, today, draggingSourceDayRef.current, visibleTaskCount) ||
+    isDropOnOwnSpan(dayKey);
 
   const byDay = new Map<string, TaskView[]>();
   // 任务日期与生命周期独立：未安排任务同样直接按 scheduledDates 进格。
@@ -662,9 +678,10 @@ export function CalendarView({ views }: { views: TaskView[] }) {
                   : undefined
               }
               onDragOver={(e) => {
-                // 所有任务（含已完成）与 ⌥ 复制均不得落过去日。
-                // 不 preventDefault = 无悬停高亮、系统 no-drop 光标，与「落到自己执行期」同款反馈。
-                if (deleteMode || !interactiveDay || isCalendarDropBlocked(key)) return;
+                // 过去日仅接收「今天格拖出的任务」且目标格本身有任务（2026-10-17 用户决策）；
+                // 其余过去日不 preventDefault = 无悬停高亮、系统 no-drop 光标，
+                // 与「落到自己执行期」同款反馈。
+                if (deleteMode || !interactiveDay || isCalendarDropBlocked(key, chips.length)) return;
                 e.preventDefault();
                 // ⌥ 按下 = 复制（系统光标带「+」角标），否则移动；修饰键按压会持续触发
                 // dragover，角标随按放实时切换
@@ -673,13 +690,14 @@ export function CalendarView({ views }: { views: TaskView[] }) {
               }}
               onDragLeave={() => setOverDay(null)}
               onDrop={(e) => {
-                // 同 onDragOver：已完成可移到其他格，但不得落到今天之前。
-                if (deleteMode || !interactiveDay || isCalendarDropBlocked(key)) return;
+                // 同 onDragOver：过去日仅接收「今天格拖出 + 目标格有任务」的落放。
+                if (deleteMode || !interactiveDay || isCalendarDropBlocked(key, chips.length)) return;
                 e.preventDefault();
                 setOverDay(null);
                 // drop 落定即清拖拽态：任务换格后源卡片/源 chip 随之卸载，dragend 不再派发
                 // 到已卸载元素（遗留非空 draggingStatus 会让工作台「拖入逾期」入口等拖拽派生
                 // 状态卡死——与 WorkbenchView.onDrop 同款防御）
+                draggingSourceDayRef.current = null;
                 useUiStore.getState().setDraggingStatus(null);
                 useUiStore.getState().setDraggingTaskId(null);
                 const id = e.dataTransfer.getData("text/task-id");

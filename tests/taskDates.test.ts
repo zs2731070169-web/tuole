@@ -13,6 +13,7 @@ import {
   scheduledOnDay,
 } from "../src/shared/taskDates";
 import { useTaskStore, emptyTask } from "../src/stores/useTaskStore";
+import { computeAutoStatus } from "../src/shared/statusMachine";
 import { addDaysKey, todayKey } from "../src/lib/date";
 import type { Task } from "../src/shared/types";
 
@@ -211,6 +212,25 @@ describe("moveTaskDay store 集成（日历拖拽落点全链路）", () => {
     // 拖它今天格（完成日 9 号）的 chip：9 号不在执行期内，旧实现会静默重开该任务
     useTaskStore.getState().moveTaskDay("done-late", "2026-10-09", "2026-10-20");
     expect(useTaskStore.getState().tasks[0]).toBe(before);
+  });
+
+  it("今天格 chip 回挪到有任务的过去格（2026-10-17）：只动那一天，startedAt 保留、状态派生逾期", () => {
+    const todayTask = emptyTask({
+      id: "today-to-past",
+      title: "其实发生在往日",
+      scheduledDates: ["2026-10-14"],
+      startedAt: "2026-10-14T08:00:00.000Z",
+    });
+    useTaskStore.setState({ tasks: [todayTask] });
+
+    useTaskStore.getState().moveTaskDay("today-to-past", "2026-10-14", "2026-10-12");
+
+    const moved = useTaskStore.getState().tasks[0];
+    expect(moved.scheduledDates).toEqual(["2026-10-12"]);
+    // 日期与生命周期解耦：回挪只改日期，已开始标记原样保留
+    expect(moved.startedAt).toBe("2026-10-14T08:00:00.000Z");
+    // 首日 < 今天 → 欠账（与工作台「拖入逾期」同语义），绝不自动完成
+    expect(computeAutoStatus(moved, { now: new Date("2026-10-14T12:00:00") })).toBe("overdue");
   });
 
   it("已完成任务移到其他日历格：只移源日，完成态与完成时间保持", () => {

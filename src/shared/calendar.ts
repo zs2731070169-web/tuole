@@ -16,9 +16,18 @@ export function canOpenCalendarDay(day: string, today: string, visibleTaskCount:
  * 日历格拖放的日期门禁（2026-10-14 用户定调）：
  * 任何生命周期（包含已完成）都可移动到今天或未来的其他格，但不能落到今天之前。
  * ⌥ 复制与普通移动共用这条日期边界。
+ * 例外（2026-10-17 用户决策）：**今天格**拖出的任务可回挪到「本身有可见任务」的过去格
+ * （移动 = 今天那一天挪到过去日成欠账；⌥ 复制 = 单日副本落该过去日）——空的过去格仍拒绝
+ * （与 canOpenCalendarDay「过去空格不可进入」同构），从其他过去格/未来格拖来同样拒绝。
  */
-export function canDropTaskOnCalendarDay(targetDay: string, today: string): boolean {
-  return targetDay >= today;
+export function canDropTaskOnCalendarDay(
+  targetDay: string,
+  today: string,
+  sourceDay: string | null = null,
+  visibleTaskCount = 0,
+): boolean {
+  if (targetDay >= today) return true;
+  return sourceDay === today && visibleTaskCount > 0;
 }
 
 export interface DayPrunePlan {

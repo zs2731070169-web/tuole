@@ -19,3 +19,16 @@ export function moveTodoItem(todos: Todo[], todoId: string, targetIndex: number)
   rest.splice(clampedIndex, 0, movedItem);
   return rest;
 }
+
+/**
+ * 待办项的展示勾选视图（2026-10-17 用户决策）：已完成任务的待办项**一律显示为已勾选**——
+ * 任务既然结束，其待办项整体视为已完成。纯生命周期派生、零存储改动：真实勾选进度完整
+ * 保留，重新打开任务即回到用户真实进度（派生可逆；不采用完成时回写 done 的方案——
+ * 那会在重新打开后丢失原进度）。
+ * 已勾选项保持原对象引用（免新建），未勾选项派生新对象、不突变入参；
+ * 未完成任务原样返回同一数组引用。
+ */
+export function todosForDisplay(todos: Todo[], taskCompleted: boolean): Todo[] {
+  if (!taskCompleted) return todos;
+  return todos.map((todo) => (todo.done ? todo : { ...todo, done: true }));
+}
