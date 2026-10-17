@@ -43,8 +43,7 @@ function emptyTask(partial: Partial<Task> = {}): Task {
 
 // 整条克隆的字段口径（浮层「复制」按钮与 ⌥ 拖拽复制共用，2026-10-10）：字段全量复制、
 // 集合浅拷防共享引用；todos 逐项换 id 且 done 清零（副本是全新执行）；完成态/草稿清空
-// （副本 status 完全由状态机派生）；身份/时间戳全新（updatedAt=now 天然满足提醒
-// 「当天提醒时刻后新建当天不双弹」）
+// （副本 status 完全由状态机派生）；身份/时间戳全新
 function buildTaskClone(source: Task): Task {
   const now = new Date().toISOString();
   return {
@@ -132,7 +131,6 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }));
   },
   createTask: (partial) => {
-    // updatedAt：当天提醒时刻之后新建的任务当天不进提醒（见 types.ts 注释）
     const task = { ...emptyTask(partial), updatedAt: new Date().toISOString() };
     set({ tasks: [task, ...get().tasks] });
     get().persist();
@@ -186,7 +184,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         .tasks.filter((t) => !deleteSet.has(t.id))
         .map((t) => {
           const remaining = pruneById.get(t.id);
-          // 修剪落 updatedAt：与手动编辑同口径参与「当天提醒时刻后改动当天不提醒」的判定
+          // 修剪落 updatedAt：与手动编辑同口径（编辑审计戳，见 types.ts 注释）
           return remaining ? { ...t, scheduledDates: remaining, updatedAt: now } : t;
         }),
     });
@@ -205,7 +203,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     } else {
       const prune = plan.prunes.find((entry) => entry.id === id);
       if (!prune) return;
-      // 修剪落 updatedAt：与手动编辑/按日期删除同口径（参与「当天提醒时刻后改动当天不提醒」判定）
+      // 修剪落 updatedAt：与手动编辑/按日期删除同口径（编辑审计戳）
       set({
         tasks: get().tasks.map((item) =>
           item.id === id

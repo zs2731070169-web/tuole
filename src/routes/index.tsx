@@ -1,4 +1,4 @@
-// 应用主界面：初始化 store + scheduler，组合顶部栏、概览（纯统计仪表盘）/工作台/日历视图、
+// 应用主界面：初始化 store + scheduler，组合顶部栏、概览（纯统计仪表盘）/工作台/日历/备忘视图、
 // 任务编辑抽屉、设置面板。贯彻「写自动流转 / 读手动筛选」交互理念（筛选查看在日历与工作台）。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
@@ -9,6 +9,8 @@ import { useSettingsStore } from "../stores/useSettingsStore";
 import { useFilterStore } from "../stores/useFilterStore";
 import { useUiStore } from "../stores/useUiStore";
 import { useCalendarStore } from "../stores/useCalendarStore";
+import { useNoteStore } from "../stores/useNoteStore";
+import { useMessageStore } from "../stores/useMessageStore";
 import { applyFilters } from "../shared/filter";
 import { computeOverviewStats } from "../shared/overviewStats";
 import { toDateKey } from "../lib/date";
@@ -23,6 +25,8 @@ import { StatsCard } from "../components/StatsCard";
 import { InsightsPanel } from "../components/InsightsPanel";
 import { WorkbenchView, WorkbenchDayPicker } from "../features/workbench/WorkbenchView";
 import { CalendarView, CalendarLeadingBar, CalendarActionsMenu } from "../features/calendar/CalendarView";
+import { NotesView, NotesDayPicker } from "../features/notes/NotesView";
+import { NotesEditor } from "../features/notes/NotesEditor";
 import { TaskEditor } from "../features/tasks/TaskEditor";
 import { SettingsPanel } from "../features/settings/SettingsPanel";
 import { SelectionBar } from "../components/SelectionBar";
@@ -32,6 +36,8 @@ export const Route = createFileRoute("/")({ component: App });
 
 function App() {
   const initTasks = useTaskStore((s) => s.init);
+  const initNotes = useNoteStore((s) => s.init);
+  const initMessages = useMessageStore((s) => s.init);
   const initSettings = useSettingsStore((s) => s.init);
   const tasks = useTaskStore((s) => s.tasks);
   const settings = useSettingsStore((s) => s.settings);
@@ -42,6 +48,7 @@ function App() {
   const returnView = useUiStore((s) => s.returnView);
   const goBackToReturnView = useUiStore((s) => s.goBackToReturnView);
   const editingId = useUiStore((s) => s.editingId);
+  const noteEditor = useUiStore((s) => s.noteEditor);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const overviewHeaderRef = useRef<HTMLDivElement | null>(null);
   const [booted, setBooted] = useState(false);
@@ -64,8 +71,10 @@ function App() {
   useEffect(() => {
     initSettings();
     initTasks();
+    initNotes(); // 备忘池独立存储，与任务数据互不影响
+    initMessages(); // 消息中心独立存储（每日摘要池）
     useTaskStore.getState().purgeEmptyDrafts();
-    startScheduler();
+    startScheduler(); // 内含当日摘要生成（幂等）：每天首次启动生成当日消息进消息中心
     startAutoBackup(); // 自动备份引擎：按设置的间隔对任务做应用内滚动快照
     setBooted(true);
     return () => {
@@ -73,7 +82,14 @@ function App() {
       stopScheduler();
       stopAutoBackup();
     };
-  }, [initSettings, initTasks]);
+  }, [initSettings, initTasks, initNotes, initMessages]);
+
+  // 摘要开关切换为开时立即生成当日摘要（幂等；承接「开启立即可验证」的既有决策）。
+  // 挂载时也会随 reminderEnabled 初值触发一次，与 startScheduler 内的生成互为幂等重入
+  const reminderEnabled = settings.reminderEnabled;
+  useEffect(() => {
+    if (reminderEnabled) useMessageStore.getState().ensureDailyDigest();
+  }, [reminderEnabled]);
 
   // views 是派生计算，必须在 useMemo 中做，避免作为 zustand selector 返回新数组导致无限重渲染。
   // draft 草稿（未点「保存」的新建任务）在此排除——任何列表/日历格/统计/筛选计数都不渲染它，
@@ -145,6 +161,8 @@ function App() {
       className="mb-4"
       onRefresh={() => {
         initTasks();
+        initNotes();
+        initMessages();
         setRefreshVersion((version) => version + 1);
       }}
       leading={
@@ -163,6 +181,9 @@ function App() {
           </div>
         ) : view === "calendar" ? (
           <CalendarLeadingBar />
+        ) : view === "notes" ? (
+          // 备忘行首单日选择器（2026-10-18 用户决策：左上角 + 单日，记于锚点）
+          <NotesDayPicker />
         ) : undefined
       }
       trailing={view === "calendar" ? <CalendarActionsMenu /> : undefined}
@@ -175,7 +196,7 @@ function App() {
     <div className="min-h-screen bg-background text-foreground">
       <TopBar />
 
-      {/* 三视图统一画布宽度：全宽自适应（2026-10 用户决策：勿写死上限——1400px 封顶在宽屏
+      {/* 各视图统一画布宽度：全宽自适应（2026-10 用户决策：勿写死上限——1400px 封顶在宽屏
           两侧流出大片空白），仅保留 px-4 边距；TopBar 内层容器同款，两缘对齐关系不变。
           刻意无底部预留 padding（2026-10 用户决策：内容一屏放得下时页面必须零滚动——
           pb-28 幻影留白曾把文档撑出视口多出一段「空滚」）；底部浮动件的可见性改由各自 sticky 承担 */}
@@ -208,10 +229,13 @@ function App() {
 
         {view === "workbench" && <WorkbenchView views={filtered} overdueTasks={workbenchOverdueTasks} />}
         {view === "calendar" && <CalendarView views={filtered} />}
+        {/* 备忘 = 独立任务暂存池（2026-10-18）：自订阅 useNoteStore，不消费任务 filtered */}
+        {view === "notes" && <NotesView />}
         {/* 概览 = 纯统计仪表盘（2026-10 用户决策：任务列表整体移除）——固定统计卡 + 洞察面板即全部 */}
       </main>
 
       {editingTask && <TaskEditor task={editingTask} />}
+      {noteEditor && <NotesEditor />}
       {settingsOpen && <SettingsPanel />}
       {/* 选中操作条：多选任务后底部浮出（批量删除等），自选门控、无选中不渲染 */}
       <SelectionBar />

@@ -1,15 +1,16 @@
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { buildTaskWorkbook, parseTasksFromWorkbook } from "../src/lib/excel";
-import { selectTasksForExcel } from "../src/lib/excelScope";
+import { buildNotesWorkbook, buildTaskWorkbook, parseNotesFromWorkbook, parseTasksFromWorkbook } from "../src/lib/excel";
+import { selectNotesForExcel, selectTasksForExcel } from "../src/lib/excelScope";
 import { planExcelImport } from "../src/shared/excelImport";
 import { EMPTY_FILTER } from "../src/shared/filter";
-import type { Task } from "../src/shared/types";
+import type { NoteItem, Task } from "../src/shared/types";
 
 const require = createRequire(import.meta.url);
-const { buildExcelBuffer } = require("../electron/excel.cjs") as {
+const { buildExcelBuffer, buildNotesExcelBuffer } = require("../electron/excel.cjs") as {
   buildExcelBuffer: (tasks: Task[]) => Buffer;
+  buildNotesExcelBuffer: (notes: NoteItem[]) => Buffer;
 };
 
 const localMorning = new Date(2026, 9, 8, 1, 19, 34);
@@ -272,5 +273,87 @@ describe("Excel 工作簿", () => {
     const result = planExcelImport([existing], [incoming], "update");
     expect(result).toMatchObject({ added: 0, matched: 0, updated: 0, ambiguous: 1 });
     expect(result.tasks).toEqual([existing]);
+  });
+});
+
+describe("备忘 Excel（2026-10-18）", () => {
+  const note = (over: Partial<NoteItem> = {}): NoteItem => ({
+    id: "note-1",
+    title: "学滑雪",
+    note: "等冬天旺季再看教练和价格",
+    createdAt: localMorning.toISOString(),
+    ...over,
+  });
+
+  it("浏览器与桌面导出同构：备忘表列头、数值日期单元格、隐藏关联表", () => {
+    const source = [note(), note({ id: "note-2", title: "读《格局》", note: "" })];
+    const browser = buildNotesWorkbook(source);
+    const desktop = XLSX.read(buildNotesExcelBuffer(source), { type: "buffer" });
+
+    for (const book of [browser, desktop]) {
+      expect(book.SheetNames).toEqual(["备忘", "__妥了关联"]);
+      expect(book.Workbook?.Sheets?.[1].Hidden).toBe(2);
+      const main = book.Sheets["备忘"];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(main, { header: 1 });
+      expect(rows[0]).toEqual(["序号", "标题", "备注", "创建时间"]);
+      expect(rows[1][1]).toBe("学滑雪");
+      expect(rows[1][2]).toBe("等冬天旺季再看教练和价格");
+      // 创建时间 = 数值日期单元格（本地墙上时间往返，与任务表同工艺）
+      expect(main["D2"].t).toBe("n");
+      expect(XLSX.utils.format_cell(main["D2"])).toBe("2026-10-08 01:19:34");
+      expect(XLSX.utils.sheet_to_json(book.Sheets["__妥了关联"])).toMatchObject([
+        { 序号: 1, 关联: "note-1" },
+        { 序号: 2, 关联: "note-2" },
+      ]);
+    }
+  });
+
+  it("导出 → 解析往返：id/标题/备注保留，创建时间本地墙上时间无损", () => {
+    const source = [note()];
+    const data = XLSX.write(buildNotesWorkbook(source), { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const parsed = parseNotesFromWorkbook(data);
+    expect(parsed.skipped).toBe(0);
+    expect(parsed.notes).toHaveLength(1);
+    expect(parsed.notes[0].id).toBe("note-1");
+    expect(parsed.notes[0].title).toBe("学滑雪");
+    expect(parsed.notes[0].note).toBe("等冬天旺季再看教练和价格");
+    expect(Math.abs(Date.parse(parsed.notes[0].createdAt) - Date.parse(source[0].createdAt))).toBeLessThan(1000);
+  });
+
+  it("手工文件（无「备忘」表名/无关联表）回落首表解析：新 id、缺创建时间补基准时刻、空标题跳过计数", () => {
+    const sheet = XLSX.utils.json_to_sheet([
+      { 标题: "手记的备忘", 备注: "说明" },
+      { 备注: "这行没有标题" },
+    ]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Sheet1");
+    const data = XLSX.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
+    const parsed = parseNotesFromWorkbook(data);
+    expect(parsed.skipped).toBe(1);
+    expect(parsed.notes).toHaveLength(1);
+    expect(parsed.notes[0].title).toBe("手记的备忘");
+    expect(parsed.notes[0].note).toBe("说明");
+    expect(parsed.notes[0].id).not.toBe("note-1");
+    expect(Number.isNaN(Date.parse(parsed.notes[0].createdAt))).toBe(false);
+  });
+
+  it("导出范围 = 搜索 + 记于单日锚点后的可见列表，文件名带备忘标签与时刻", () => {
+    const now = new Date(2026, 9, 8, 1, 30);
+    // 本地时间构造时间戳：任何时区下「本地日」恒定，测试不随运行环境 TZ 漂移
+    const notes = [
+      note({ id: "in", title: "学滑雪", createdAt: new Date(2026, 9, 8, 9, 19, 34).toISOString() }),
+      note({ id: "out-day", title: "旧日滑雪备忘", createdAt: new Date(2026, 9, 7, 9, 19, 34).toISOString() }),
+      note({ id: "out-keyword", title: "读《格局》", createdAt: new Date(2026, 9, 8, 9, 19, 34).toISOString() }),
+    ];
+    const result = selectNotesForExcel(notes, {
+      filter: { ...EMPTY_FILTER, keyword: "滑雪" },
+      notesDay: "2026-10-08",
+      now,
+    });
+    expect(result.notes.map((item) => item.id)).toEqual(["in"]);
+    expect(result.fileName).toBe("妥了备忘_2026-10-08_0130.xlsx");
+    // notesDay = null（全部日期）时只受关键词约束
+    const all = selectNotesForExcel(notes, { filter: { ...EMPTY_FILTER, keyword: "滑雪" }, notesDay: null, now });
+    expect(all.notes.map((item) => item.id)).toEqual(["in", "out-day"]);
   });
 });

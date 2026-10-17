@@ -23,6 +23,8 @@ function isContiguousDayKeys(dates) {
 }
 const EXCEL_HEADERS = ["序号", "标题", "备注", "标签", "分组", "优先级", "安排日期", "截止日期", "创建时间", "完成时间"];
 const TODO_HEADERS = ["所属任务序号", "所属任务标题", "待办项", "已完成"];
+const NOTES_HEADERS = ["序号", "标题", "备注", "创建时间"];
+const NOTES_SHEET = "备忘";
 const META_SHEET = "__妥了关联";
 const PRIORITY_LABEL = { high: "高", medium: "中", low: "低", none: "无" };
 
@@ -89,4 +91,34 @@ function buildExcelBuffer(tasks) {
   return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
 }
 
-module.exports = { buildExcelBuffer };
+// 备忘工作簿（2026-10-18）：与浏览器版 src/lib/excel.ts 的 buildNotesWorkbook 同构——
+// 「备忘」表（序号/标题/备注/创建时间，创建时间 = 数值日期单元格）+ 隐藏关联表（序号→id）
+function buildNotesExcelBuffer(notes) {
+  const XLSX = require("xlsx");
+  const list = Array.isArray(notes) ? notes : [];
+  const rows = list.map((note, index) => ({
+    序号: index + 1,
+    标题: note.title,
+    备注: typeof note.note === "string" ? note.note : "",
+    创建时间: "",
+  }));
+  const worksheet = XLSX.utils.json_to_sheet(rows, { header: NOTES_HEADERS });
+  list.forEach((note, index) => {
+    const serial = excelLocalDateTime(note.createdAt);
+    if (serial !== null) {
+      // 创建时间列号 = 3（序号/标题/备注之后）
+      worksheet[XLSX.utils.encode_cell({ r: index + 1, c: 3 })] = {
+        t: "n", v: serial, z: "yyyy-mm-dd hh:mm:ss",
+      };
+    }
+  });
+  worksheet["!cols"] = [{ wch: 8 }, { wch: 30 }, { wch: 40 }, { wch: 22 }];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, NOTES_SHEET);
+  const meta = XLSX.utils.json_to_sheet(list.map((note, index) => ({ 序号: index + 1, 关联: note.id })));
+  XLSX.utils.book_append_sheet(workbook, meta, META_SHEET);
+  workbook.Workbook = { Sheets: workbook.SheetNames.map((name) => ({ Hidden: name === META_SHEET ? 2 : 0 })) };
+  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+}
+
+module.exports = { buildExcelBuffer, buildNotesExcelBuffer };

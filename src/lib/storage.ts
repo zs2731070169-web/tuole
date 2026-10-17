@@ -1,14 +1,15 @@
 // 本地持久化（完全离线、数据不出本机）：
 // - 浏览器版：localStorage；
-// - 桌面版（Electron）：用户目录 ~/.tuole 下的分类 JSON 文件（tasks/settings/ui/backups.json），
+// - 桌面版（Electron）：用户目录 ~/.tuole 下的分类 JSON 文件（tasks/settings/ui/backups/notes/messages.json），
 //   桌面桥缺失/不可用时自动回落 localStorage，两条路径共用同一组 load*/save* 入口。
-import type { Task, Settings, ViewMode } from "../shared/types";
+import type { AppMessage, DailyDigestPayload, NoteItem, Task, Settings, ViewMode } from "../shared/types";
 import { DEFAULT_SETTINGS, VIEW_MODES } from "../shared/types";
 import { STORAGE_KEYS } from "../shared/constants";
 import { normalizeTodoItems } from "../shared/types";
 import { normalizeTags } from "../shared/tags";
 import { normalizeGroup } from "../shared/groups";
 import { expandLegacySpan, normalizeScheduledDays } from "../shared/taskDates";
+import { MAX_MESSAGES } from "../shared/messages";
 import { todayKey, toDateKey } from "./date";
 import { getDesktopStorageBridge, type DesktopStorageFile } from "./desktopBridge";
 
@@ -24,6 +25,8 @@ const STORAGE_FILES: Record<StorageKey, DesktopStorageFile> = {
   [STORAGE_KEYS.settings]: "settings.json",
   [STORAGE_KEYS.ui]: "ui.json",
   [STORAGE_KEYS.backups]: "backups.json",
+  [STORAGE_KEYS.notes]: "notes.json",
+  [STORAGE_KEYS.messages]: "messages.json",
 };
 
 // 桌面端写文件是异步的。手动刷新紧接着编辑时，优先读取本进程尚在写入的最新内容，
@@ -151,8 +154,11 @@ export function loadSettings(): Settings {
   try {
     const raw = readRaw(STORAGE_KEYS.settings);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw) as Partial<Settings> & { fallbackShortcutEnabled?: unknown };
+    // fallbackShortcutEnabled / reminderTime 为已下线设置的遗留键：剥离防回流
+    // （reminderTime 随 2026-10-18 提醒重构删除，磁盘副本在下次写盘时自然清洗）
+    const parsed = JSON.parse(raw) as Partial<Settings> & { fallbackShortcutEnabled?: unknown; reminderTime?: unknown };
     delete parsed.fallbackShortcutEnabled;
+    delete parsed.reminderTime;
     return { ...DEFAULT_SETTINGS, ...parsed };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -224,5 +230,106 @@ export function saveBackups(backups: TaskBackup[]): void {
     writeRaw(STORAGE_KEYS.backups, JSON.stringify(backups));
   } catch {
     /* 存储满等异常静默降级：快照是尽力而为的兜底，不阻塞主流程 */
+  }
+}
+
+// 备忘条目的形状归一：id/title 非法的坏条目丢弃（返回 null）、note 非字符串归 ""、
+// createdAt 缺失/非法补当前时刻——备忘无历史迁移包袱，仅做防御性清洗
+function sanitizeNoteEntry(entry: unknown): NoteItem | null {
+  if (!entry || typeof entry !== "object") return null;
+  const candidate = entry as Partial<NoteItem>;
+  if (typeof candidate.id !== "string" || typeof candidate.title !== "string" || candidate.title.trim() === "") {
+    return null;
+  }
+  const created = typeof candidate.createdAt === "string" && !Number.isNaN(Date.parse(candidate.createdAt))
+    ? candidate.createdAt
+    : new Date().toISOString();
+  return {
+    id: candidate.id,
+    title: candidate.title,
+    note: typeof candidate.note === "string" ? candidate.note : "",
+    createdAt: created,
+    ...(typeof candidate.updatedAt === "string" ? { updatedAt: candidate.updatedAt } : {}),
+  };
+}
+
+export function loadNotes(): NoteItem[] {
+  try {
+    const raw = readRaw(STORAGE_KEYS.notes);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // 只收形状合法的条目，坏条目静默丢弃（与 loadBackups 同纪律）
+    return parsed
+      .map((entry) => sanitizeNoteEntry(entry))
+      .filter((entry): entry is NoteItem => entry !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function saveNotes(notes: NoteItem[]): void {
+  try {
+    writeRaw(STORAGE_KEYS.notes, JSON.stringify(notes));
+  } catch {
+    /* 存储满等异常静默降级，不阻塞 UI */
+  }
+}
+
+// 消息条目的形状归一（2026-10-18 消息中心）：id/dayKey/digest 非法的坏条目丢弃（返回 null）、
+// readAt 非字符串归 null（未读）；整体按 dayKey 降序 + 滚动保留最近 MAX_MESSAGES 条
+function sanitizeMessageEntry(entry: unknown): AppMessage | null {
+  if (!entry || typeof entry !== "object") return null;
+  const candidate = entry as Partial<AppMessage> & { digest?: Partial<AppMessage["digest"]> };
+  if (typeof candidate.id !== "string" || typeof candidate.dayKey !== "string" || candidate.kind !== "dailyDigest") {
+    return null;
+  }
+  const digest = candidate.digest;
+  if (!digest || typeof digest.todayCount !== "number" || typeof digest.overdueCount !== "number" || !Array.isArray(digest.tasks)) {
+    return null;
+  }
+  return {
+    id: candidate.id,
+    kind: "dailyDigest",
+    dayKey: candidate.dayKey,
+    createdAt: typeof candidate.createdAt === "string" ? candidate.createdAt : new Date().toISOString(),
+    readAt: typeof candidate.readAt === "string" ? candidate.readAt : null,
+    digest: {
+      todayCount: digest.todayCount,
+      overdueCount: digest.overdueCount,
+      // 任务引用只收形状合法条目（taskId/title 双字符串），防脏数据撑爆存储
+      tasks: digest.tasks.filter(
+        (entry): entry is DailyDigestPayload["tasks"][number] =>
+          !!entry && typeof entry === "object" &&
+          typeof (entry as DailyDigestPayload["tasks"][number]).taskId === "string" &&
+          typeof (entry as DailyDigestPayload["tasks"][number]).title === "string",
+      ),
+      hiddenCount: typeof digest.hiddenCount === "number" ? digest.hiddenCount : 0,
+    },
+  };
+}
+
+export function loadMessages(): AppMessage[] {
+  try {
+    const raw = readRaw(STORAGE_KEYS.messages);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // 只收形状合法的条目（与 loadNotes 同纪律），按 dayKey 降序（新→旧）+ 滚动截断
+    return parsed
+      .map((entry) => sanitizeMessageEntry(entry))
+      .filter((entry): entry is AppMessage => entry !== null)
+      .sort((a, b) => (a.dayKey < b.dayKey ? 1 : a.dayKey > b.dayKey ? -1 : 0))
+      .slice(0, MAX_MESSAGES);
+  } catch {
+    return [];
+  }
+}
+
+export function saveMessages(messages: AppMessage[]): void {
+  try {
+    writeRaw(STORAGE_KEYS.messages, JSON.stringify(messages));
+  } catch {
+    /* 存储满等异常静默降级：消息是提醒通知，丢失不阻塞主流程 */
   }
 }

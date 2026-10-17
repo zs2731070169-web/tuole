@@ -4,15 +4,14 @@
 // 2) http://127.0.0.1:固定端口 的源稳定，跨启动数据源才唯一。
 // 端口固定 34567 + 单实例锁：双开应用会因端口冲突/源漂移丢数据，锁掉即可保证源唯一。
 // 本地数据契约：桌面版所有数据分类存放于用户目录 ~/.tuole/
-// （tasks/settings/ui/backups.json + backups/ 快照镜像），localStorage 仅作首启迁移来源。
-const { app, BrowserWindow, shell, dialog, ipcMain, Notification, screen, powerMonitor } = require("electron");
+// （tasks/settings/ui/backups/notes/messages.json + backups/ 快照镜像），localStorage 仅作首启迁移来源。
+// 桌面提醒已于 2026-10-18 重构为渲染层消息中心（每日首启摘要），主进程不再调度提醒。
+const { app, BrowserWindow, shell, dialog, ipcMain } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 const fsPromises = require("node:fs/promises");
 const os = require("node:os");
-const { spawn } = require("node:child_process");
-const { createDesktopReminderEngine, reminderPopupPosition } = require("./reminder.cjs");
 
 const FIXED_PORT = 34567;
 const DIST_DIR = path.join(__dirname, "..", "dist");
@@ -30,7 +29,7 @@ if (DEV_URL && process.env.TUOLE_TEST_DATA_DIR) {
   app.setPath("userData", testUserData);
 }
 // 存储文件白名单：渲染进程只能读写这几个名字，IPC 不会被当成任意文件读写器
-const STORAGE_FILES = new Set(["tasks.json", "settings.json", "ui.json", "backups.json"]);
+const STORAGE_FILES = new Set(["tasks.json", "settings.json", "ui.json", "backups.json", "notes.json", "messages.json"]);
 // 单文件载荷上限（任务数据远小于此；超限视为异常请求直接拒绝）
 const MAX_STORAGE_TEXT_LENGTH = 20 * 1024 * 1024;
 
@@ -131,156 +130,6 @@ ipcMain.handle("tuole:backup:open-directory", async () => {
   return error ? { ok: false, path: directory, error } : { ok: true, path: directory };
 });
 
-// ── 桌面到期提醒 ──────────────────────────────────────────────────────────────
-// 计时、任务判定、每日去重都在主进程；视觉提示由独立浮层窗口承载。
-// macOS 通知中心仅做补充，关闭通知权限也不会让提醒整体静默。
-const REMINDER_LEDGER = "reminder-ledger.json";
-let reminderWindow = null;
-let reminderDismissTimer = null;
-let mainWindow = null;
-
-function readReminderJson(name, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(DATA_DIR, name), "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeReminderLedger(ledger) {
-  dataDirectory();
-  const target = path.join(DATA_DIR, REMINDER_LEDGER);
-  const temporary = `${target}.tmp-${process.pid}`;
-  fs.writeFileSync(temporary, JSON.stringify(ledger), "utf8");
-  fs.renameSync(temporary, target);
-}
-
-function escapeReminderHtml(value) {
-  return String(value).replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[char]);
-}
-
-function closeReminderWindow() {
-  if (reminderDismissTimer) clearTimeout(reminderDismissTimer);
-  reminderDismissTimer = null;
-  if (reminderWindow && !reminderWindow.isDestroyed()) reminderWindow.close();
-  reminderWindow = null;
-}
-
-function reminderDisplayAndPosition(popupWidth, popupHeight) {
-  const bounds = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null;
-  const display = bounds ? screen.getDisplayMatching(bounds) : screen.getPrimaryDisplay();
-  return reminderPopupPosition(bounds, display.workArea, popupWidth, popupHeight);
-}
-
-function followMainWindow() {
-  if (!reminderWindow || reminderWindow.isDestroyed()) return;
-  const { width, height } = reminderWindow.getBounds();
-  const { x, y } = reminderDisplayAndPosition(width, height);
-  reminderWindow.setPosition(x, y);
-}
-
-function playReminderSound() {
-  // macOS 媒体音量与「提醒音量」是两条通道。优先播放系统自带音效，
-  // 避免用户关闭系统提示音后 shell.beep() 也完全听不见。
-  const sound = "/System/Library/Sounds/Glass.aiff";
-  if (process.platform === "darwin" && fs.existsSync(sound)) {
-    try {
-      const player = spawn("/usr/bin/afplay", [sound], { stdio: "ignore" });
-      let settled = false;
-      const fallback = () => {
-        if (settled) return;
-        settled = true;
-        try { shell.beep(); } catch (error) { console.error("[reminder] sound failed", error); }
-      };
-      player.once("error", fallback);
-      player.once("close", (code) => { if (code !== 0) fallback(); });
-      return;
-    } catch (error) {
-      console.error("[reminder] audio player failed", error);
-    }
-  }
-  try { shell.beep(); } catch (error) { console.error("[reminder] sound failed", error); }
-}
-
-async function showDesktopReminder({ title, body = "" }) {
-  const safeTitle = String(title).slice(0, 160);
-  const safeBody = String(body).slice(0, 320);
-  closeReminderWindow();
-
-  let visible = false;
-  try {
-    const popupWidth = 380;
-    const popupHeight = 138;
-    const { x, y } = reminderDisplayAndPosition(popupWidth, popupHeight);
-    const zh = readReminderJson("settings.json", {}).language !== "en-US";
-    const popup = new BrowserWindow({
-      width: popupWidth,
-      height: popupHeight,
-      x,
-      y,
-      frame: false,
-      transparent: true,
-      backgroundColor: "#00000000",
-      hasShadow: false,
-      alwaysOnTop: true,
-      focusable: true,
-      skipTaskbar: true,
-      resizable: false,
-      show: false,
-      webPreferences: {
-        preload: path.join(__dirname, "reminder-preload.cjs"),
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-      },
-    });
-    reminderWindow = popup;
-    const html = `<!doctype html><html lang="${zh ? "zh" : "en"}"><meta charset="utf-8"><style>
-      *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}
-      body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;color:#182331}
-      .card{position:relative;width:100%;height:100%;border:1px solid #d8e3ee;border-radius:15px;background:#fff;padding:19px 52px 16px 20px;overflow:hidden}
-      .brand{color:#2375d1;font-size:11px;font-weight:700;letter-spacing:.03em;margin-bottom:8px}
-      .title{font-size:15px;font-weight:700;line-height:1.3;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .body{font-size:12px;line-height:1.45;color:#526173;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-      .close{position:absolute;top:11px;right:11px;width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:#6b7788;cursor:pointer}
-      .close:hover{background:#eef3f8;color:#182331}.close:focus-visible{outline:2px solid #2375d1;outline-offset:1px}
-    </style><div class="card" role="alert"><button class="close" type="button" aria-label="${zh ? "关闭提醒" : "Close reminder"}" id="close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button><div class="brand">妥了 · ToDone</div><div class="title">${escapeReminderHtml(safeTitle)}</div><div class="body">${escapeReminderHtml(safeBody)}</div></div><script>document.getElementById("close").addEventListener("click",()=>window.tuoleReminder.close())</script></html>`;
-    await popup.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    if (!popup.isDestroyed()) {
-      popup.showInactive();
-      visible = popup.isVisible();
-      reminderDismissTimer = setTimeout(closeReminderWindow, 12_000);
-    }
-  } catch (error) {
-    console.error("[reminder] popup failed", error);
-    closeReminderWindow();
-  }
-
-  playReminderSound();
-  try {
-    if (Notification.isSupported()) new Notification({ title: safeTitle, body: safeBody, silent: true }).show();
-  } catch (error) {
-    console.error("[reminder] system notification failed", error);
-  }
-  return visible;
-}
-
-ipcMain.on("tuole:reminder:close", (event) => {
-  if (reminderWindow && !reminderWindow.isDestroyed() && event.sender === reminderWindow.webContents) {
-    closeReminderWindow();
-  }
-});
-
-const desktopReminder = createDesktopReminderEngine({
-  readSettings: () => readReminderJson("settings.json", {}),
-  readTasks: () => readReminderJson("tasks.json", []),
-  readLedger: () => readReminderJson(REMINDER_LEDGER, {}),
-  writeLedger: writeReminderLedger,
-  deliver: showDesktopReminder,
-});
-
 // ── ~/.tuole 分类存储 IPC ──────────────────────────────────────────────────────
 // 同步读（sendSync）：渲染层 store 初始化在模块加载期（如 useUiStore 的初始 view），
 // 必须同步拿到首帧数据；文件不存在/名字非法一律返回 null，由渲染层回落迁移逻辑。
@@ -324,7 +173,6 @@ ipcMain.handle("tuole:storage:write", (_event, name, text) => {
         const current = queue.pending;
         queue.pending = null;
         await atomicWrite(name, current);
-        if (name === "settings.json" || name === "tasks.json") void desktopReminder.check();
       }
     })()
       // 落盘失败静默降级：与 localStorage 写满即忽略的语义一致，存储层写是尽力而为
@@ -400,18 +248,20 @@ ipcMain.handle("tuole:file:write", async (_event, filePath, data) => {
 // ── Excel 专用事务 IPC ───────────────────────────────────────────────────────
 // 导出必须在用户确认保存路径之后才加载 SheetJS 并序列化，避免渲染层在系统面板
 // 出现前同步计算；导入则由主进程打开面板并读取原始字节，一次 invoke 完成整条链路。
-const { buildExcelBuffer } = require("./excel.cjs");
+const { buildExcelBuffer, buildNotesExcelBuffer } = require("./excel.cjs");
 
 ipcMain.handle("tuole:excel:export", async (event, payload = {}) => {
-  const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
-  if (tasks.length === 0) throw new Error("No tasks to export");
+  const rows = Array.isArray(payload.tasks) ? payload.tasks : [];
+  if (rows.length === 0) throw new Error("No rows to export");
+  // kind 区分载荷域（2026-10-18 备忘导出复用本通道，preload 透传 options 天然兼容）
+  const buffer = payload.kind === "notes" ? buildNotesExcelBuffer(rows) : buildExcelBuffer(rows);
   const result = await dialog.showSaveDialog(dialogWindow(event), {
     title: typeof payload.title === "string" ? payload.title.slice(0, 120) : undefined,
     defaultPath: typeof payload.defaultPath === "string" ? payload.defaultPath.slice(0, 240) : undefined,
     filters: [{ name: "Excel", extensions: ["xlsx"] }],
   });
   if (result.canceled || !result.filePath) return { canceled: true };
-  await fsPromises.writeFile(result.filePath, buildExcelBuffer(tasks));
+  await fsPromises.writeFile(result.filePath, buffer);
   return { canceled: false, filePath: result.filePath };
 });
 
@@ -495,10 +345,6 @@ if (!app.requestSingleInstanceLock()) {
       },
       autoHideMenuBar: true,
     });
-    mainWindow = win;
-    win.on("move", followMainWindow);
-    win.on("resize", followMainWindow);
-    win.on("closed", () => { if (mainWindow === win) mainWindow = null; });
     win.once("ready-to-show", () => win.show());
     // 外链交给系统浏览器打开，应用内不跳走
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -517,18 +363,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     sweepStaleTempFiles(); // 清掉上次异常退出可能留下的 *.tmp-<pid> 残片
-    screen.on("display-metrics-changed", followMainWindow);
-    screen.on("display-removed", followMainWindow);
-    createWindow().then(() => desktopReminder.start()).catch((error) => {
+    createWindow().catch((error) => {
       console.error("[app] window failed", error);
     });
-    powerMonitor.on("resume", () => { void desktopReminder.check(); });
-    powerMonitor.on("unlock-screen", () => { void desktopReminder.check(); });
-  });
-
-  app.on("before-quit", () => {
-    desktopReminder.stop();
-    closeReminderWindow();
   });
 
   app.on("window-all-closed", () => {

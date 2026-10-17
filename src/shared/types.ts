@@ -40,8 +40,8 @@ export interface Task {
   startedAt?: string | null;
   todos: Todo[];
   createdAt: string; // ISO
-  // 最近一次用户侧创建/编辑落库时刻（ISO，可选兼容历史数据）：当天提醒时刻之后改动的任务
-  // 当天不进到期提醒（保存反馈由顶部 toast 承担，紧随的提醒弹窗构成双弹打扰）——见 reminder.cjs
+  // 最近一次用户侧创建/编辑落库时刻（ISO，可选兼容历史数据）：编辑审计戳；
+  // 亦被 storage 的 startedAt 迁移回填与 taskElapsed 的迁移伪影防御引用
   updatedAt?: string;
   completedAt: string | null; // ISO
   completedReason: CompletedReason;
@@ -73,9 +73,46 @@ export interface FilterState {
   keyword: string;
 }
 
+// 备忘（2026-10-18 新增第 4 视图）：记录「未来某一天可能会安排、现在还不确定」的任务暂存池。
+// 独立实体、独立存储，不参与任务的状态机/筛选/统计/Excel/备份/提醒任何链路；
+// 可经「转为任务」打开缓冲侧边栏，显式选定单日并确认后转成正式任务、从池中移除。
+export interface NoteItem {
+  id: string;
+  title: string; // 必填：保存时校验非空
+  note: string; // 备注（选填）
+  createdAt: string; // ISO
+  updatedAt?: string; // 最近一次编辑落库时刻
+}
+
+// 消息中心（2026-10-18 提醒重构）：每日首启摘要取代固定时间提醒，弹窗/音效投递整体下线。
+// 独立实体、独立存储（todo.messages.v1 / ~/.tuole/messages.json），不参与任务任何链路；
+// 每天至多一条 dailyDigest，id = `digest-{dayKey}`（dayKey 兼作当日去重键）。
+
+/** 摘要内任务引用：taskId 供整行点击跳转与实时状态同步；title 只作任务删除后的快照兜底。 */
+export interface DigestTaskRef {
+  taskId: string;
+  title: string;
+}
+
+export interface DailyDigestPayload {
+  todayCount: number; // 生成时刻快照；渲染时按 tasks × 当前任务库实时重算
+  overdueCount: number; // 生成时刻快照；渲染时按 tasks × 当前任务库实时重算
+  tasks: DigestTaskRef[]; // 生成时的全部任务引用（today 在前 overdue 在后）；展示层自行截断
+  hiddenCount: number; // 旧版截断载荷的兼容差额；新版固定 0
+}
+
+export interface AppMessage {
+  id: string; // `digest-{dayKey}`
+  kind: "dailyDigest"; // 判别联合预留：v1 只有每日摘要一种消息
+  dayKey: string; // 消息所属日 YYYY-MM-DD（本地日键）
+  createdAt: string; // 生成时刻 ISO
+  readAt: string | null; // 已读时刻 ISO；null = 未读（红点判定依据）
+  digest: DailyDigestPayload;
+}
+
 // 工作台（未安排/今日/已完成三栏）取代旧的时间轴流水视图
 // 运行时清单是唯一真相源：类型由它派生，storage 的持久化校验也用它，新增视图不会两处漂移
-export const VIEW_MODES = ["workbench", "calendar", "all"] as const;
+export const VIEW_MODES = ["workbench", "calendar", "all", "notes"] as const;
 export type ViewMode = (typeof VIEW_MODES)[number];
 export type ThemeMode = "system" | "light" | "dark";
 export type RollOverTarget = "tomorrow" | "nextWeekday";
@@ -84,8 +121,7 @@ export interface Settings {
   theme: ThemeMode;
   language: "zh-CN" | "en-US";
   rollOverTarget: RollOverTarget; // 顺延默认目标
-  reminderEnabled: boolean;
-  reminderTime: string; // 到期提醒时间 "HH:MM"（24 小时制），默认 "09:00"
+  reminderEnabled: boolean; // 每日摘要开关：开启后每天首次启动生成当日消息（消息中心查看）
   autoBackupEnabled: boolean; // 自动备份开关（应用内滚动快照），默认关
   autoBackupIntervalMinutes: number; // 自动备份最小间隔（分钟），默认 30
 }
@@ -95,7 +131,6 @@ export const DEFAULT_SETTINGS: Settings = {
   language: "zh-CN",
   rollOverTarget: "tomorrow",
   reminderEnabled: false,
-  reminderTime: "09:00",
   autoBackupEnabled: false,
   autoBackupIntervalMinutes: 30,
 };

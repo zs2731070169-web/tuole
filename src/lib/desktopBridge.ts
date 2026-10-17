@@ -1,4 +1,4 @@
-import type { Task } from "../shared/types";
+import type { NoteItem, Task } from "../shared/types";
 import type { TaskBackup } from "./storage";
 
 export interface DesktopBridgeResult {
@@ -8,7 +8,13 @@ export interface DesktopBridgeResult {
 }
 
 // ~/.tuole 数据目录下的分类存储文件（与主进程 STORAGE_FILES 白名单一致）
-export type DesktopStorageFile = "tasks.json" | "settings.json" | "ui.json" | "backups.json";
+export type DesktopStorageFile =
+  | "tasks.json"
+  | "settings.json"
+  | "ui.json"
+  | "backups.json"
+  | "notes.json"
+  | "messages.json";
 
 export interface DesktopFileDialogFilter {
   name: string;
@@ -28,6 +34,8 @@ export interface DesktopSaveFileResult {
 export interface DesktopExcelOptions {
   title?: string;
   defaultPath?: string;
+  /** 导出载荷域（2026-10-18 备忘导入导出）：主进程据此选工作簿构造器，缺省 = 任务 */
+  kind?: "tasks" | "notes";
 }
 
 export interface DesktopExcelResult {
@@ -50,7 +58,7 @@ export interface DesktopBridge {
     filters?: DesktopFileDialogFilter[];
   }) => Promise<DesktopSaveFileResult>;
   writeFile: (filePath: string, data: ArrayBuffer | Uint8Array) => Promise<void>;
-  exportExcel: (tasks: Task[], options?: DesktopExcelOptions) => Promise<DesktopExcelResult>;
+  exportExcel: (rows: Task[] | NoteItem[], options?: DesktopExcelOptions) => Promise<DesktopExcelResult>;
   importExcel: (options?: Pick<DesktopExcelOptions, "title">) => Promise<DesktopExcelResult>;
   syncBackups: (backups: TaskBackup[]) => Promise<DesktopBridgeResult>;
   openBackupDirectory: () => Promise<DesktopBridgeResult>;
@@ -94,9 +102,12 @@ export function writeDesktopFile(filePath: string, data: ArrayBuffer | Uint8Arra
     : Promise.reject(new Error("Desktop file bridge unavailable"));
 }
 
-export function exportDesktopExcel(tasks: Task[], options?: DesktopExcelOptions): Promise<DesktopExcelResult | null> {
+export function exportDesktopExcel(
+  rows: Task[] | NoteItem[],
+  options?: DesktopExcelOptions,
+): Promise<DesktopExcelResult | null> {
   return typeof window !== "undefined" && window.tuoleDesktop?.exportExcel
-    ? window.tuoleDesktop.exportExcel(tasks, options)
+    ? window.tuoleDesktop.exportExcel(rows, options)
     : Promise.resolve(null);
 }
 

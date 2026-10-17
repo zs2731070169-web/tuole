@@ -1,10 +1,11 @@
-// 模块内容区工具行：搜索 + 筛选条件 + Excel 导入导出 + 共用「新建」——三个视图共用，
+// 模块内容区工具行：搜索 + 筛选条件 + Excel 导入导出 + 共用「新建」——工作台/日历/备忘共用，
 // 在 routes/index.tsx 渲染于 StatusFilterBar 之下、各模块内容之上；
 // 顶栏（TopBar）只保留品牌 / 视图切换 / 设置等全局项，不放模块级控件。
 // 快捷键已于 2026-10 整体下线（用户决策：使用频率低），搜索框聚焦 ref 链路随之移除。
-// 「概览」是纯查看视图：不渲染新建按钮（新建入口只在工作台/日历）。
+// 「概览」是纯查看视图：不渲染本工具行（新建入口只在工作台/日历/备忘）。
 // 筛选条件全部平铺（无弹层）：工作台 = 优先级行内组；日历 = 日期范围（按日期组织任务，
-// 优先级在该视图冗余）；「概览」= 优先级 + 日期范围。原 FilterPanel 弹层已删除。
+// 优先级在该视图冗余）；备忘 = 行首单日选择器（记于锚点，在 leading 槽不在本行右组）+
+// 备忘 Excel 导入导出（2026-10-18 用户要求补上）。原 FilterPanel 弹层已删除。
 import { useEffect, useRef, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ import type { Priority } from "../shared/types";
 import { SearchBox } from "./SearchBox";
 import { DateRangeField } from "./DateRangeField";
 import { TaskIOButtons } from "./TaskIOButtons";
+import { NoteIOButtons } from "./NoteIOButtons";
 
 interface Props {
   className?: string;
@@ -59,12 +61,13 @@ export function ViewToolbar({ className, leading, trailing, onRefresh }: Props) 
     <div className={cn("flex flex-wrap items-center justify-end gap-x-4 gap-y-2", className)}>
       {leading && <div className={cn("mr-auto max-w-full shrink-0", isCalendarDeleting && "w-full")}>{leading}</div>}
       {!isCalendarDeleting && <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-2 max-sm:w-full max-sm:justify-start">
-        {view !== "all" && <NewTaskButton />}
+        {view === "notes" ? <NewNoteButton /> : view !== "all" && <NewTaskButton />}
         <SearchBox value={keyword} onSearch={setKeyword} className="w-72 max-w-full max-sm:min-w-48 max-sm:flex-1" />
-        {/* 优先级只给「概览」/工作台：日历按日期组织任务，优先级筛选在该视图冗余 */}
-        {view !== "calendar" && <PriorityInlineFilter />}
-        {/* 日期范围给「概览」/日历；工作台按选中日锚定，不参与 */}
-        {view !== "workbench" && <DateRangeInlineFilter />}
+        {/* 优先级只给工作台（概览不渲染本工具行、备忘无优先级字段）：日历按日期组织任务，优先级筛选在该视图冗余 */}
+        {view === "workbench" && <PriorityInlineFilter />}
+        {/* 日期范围只给日历（工作台按选中日锚定不参与；备忘的日期选择 = 行首单日选择器
+            NotesDayPicker，2026-10-18 用户决策：不用范围胶囊，勿加回） */}
+        {view === "calendar" && <DateRangeInlineFilter />}
         <div className="flex items-center gap-1 border-l border-border/70 pl-2 sm:pl-3">
           <button
             type="button"
@@ -75,7 +78,8 @@ export function ViewToolbar({ className, leading, trailing, onRefresh }: Props) 
           >
             <RefreshCw className={cn("size-4", refreshing && "animate-spin")} aria-hidden="true" />
           </button>
-          <TaskIOButtons />
+          {/* Excel：任务视图走任务表，备忘视图走备忘表（2026-10-18 用户要求补上，各自独立往返） */}
+          {view === "notes" ? <NoteIOButtons /> : <TaskIOButtons />}
           {trailing}
         </div>
       </div>}
@@ -135,6 +139,26 @@ function NewTaskButton() {
         "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[13px] font-medium text-foreground transition-colors",
         pastDayPicked ? "cursor-not-allowed opacity-40" : "hover:bg-muted active:scale-95",
       )}
+    >
+      <Plus className="size-4" />
+      <span className="hidden sm:inline">{lang === "zh-CN" ? "新建" : "New"}</span>
+    </button>
+  );
+}
+
+// 备忘视图的「新建」入口（2026-10-18）：打开备忘编辑抽屉（create 模式）——备忘创建零副作用、
+// 无任务的 draft 机制，点「保存」才落库；无日期逻辑、永不禁用
+function NewNoteButton() {
+  const lang = useSettingsStore((s) => s.settings.language);
+  const openNoteEditor = useUiStore((s) => s.openNoteEditor);
+
+  return (
+    <button
+      type="button"
+      onClick={() => openNoteEditor({ mode: "create" })}
+      aria-label={t("notes.new", lang)}
+      title={t("notes.new", lang)}
+      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-[13px] font-medium text-foreground transition-colors hover:bg-muted active:scale-95"
     >
       <Plus className="size-4" />
       <span className="hidden sm:inline">{lang === "zh-CN" ? "新建" : "New"}</span>

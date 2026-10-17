@@ -12,15 +12,17 @@ import { friendlyDate, fromDateKey, toDateKey, todayKey } from "../lib/date";
 
 interface Props {
   lang: Lang;
-  /** 当前安排日（YYYY-MM-DD）；null = 未安排 */
+  /** 当前所选日（YYYY-MM-DD）；null = 尚未选择 */
   value: string | null;
-  /** 选定某天或清除（null = 回未安排）；父级负责落库 */
+  /** 选定某天或清除；父级负责缓冲/落库 */
   onChange: (dateKey: string | null) => void;
   /** 无值时的占位文案；默认「未安排日期」 */
   placeholder?: string;
+  /** 是否显示清除入口；日期必填的确认流程可关闭。 */
+  allowClear?: boolean;
 }
 
-export function SingleDateField({ lang, value, onChange, placeholder }: Props) {
+export function SingleDateField({ lang, value, onChange, placeholder, allowClear = true }: Props) {
   const [open, setOpen] = useState(false);
   const zh = lang === "zh-CN";
 
@@ -59,14 +61,16 @@ export function SingleDateField({ lang, value, onChange, placeholder }: Props) {
             <Check className="size-3 opacity-60" />
             {t("date.today", lang)}
           </button>
-          <button
-            type="button"
-            onClick={() => pick(null)}
-            className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
-          >
-            <Eraser className="size-3 opacity-60" />
-            {t("action.unschedule", lang)}
-          </button>
+          {allowClear && (
+            <button
+              type="button"
+              onClick={() => pick(null)}
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
+            >
+              <Eraser className="size-3 opacity-60" />
+              {t("action.unschedule", lang)}
+            </button>
+          )}
         </div>
         <Calendar
           mode="single"

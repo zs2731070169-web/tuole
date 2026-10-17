@@ -1,7 +1,8 @@
-import type { FilterState, Task, TaskView, ViewMode } from "../shared/types";
+import type { FilterState, NoteItem, Task, TaskView, ViewMode } from "../shared/types";
 import { computeAutoStatus } from "../shared/statusMachine";
 import { applyFilters } from "../shared/filter";
 import { bucketWorkbenchColumns } from "../shared/workbench";
+import { filterNotes, filterNotesByCreatedRange } from "../shared/notes";
 import { monthGrid, toDateKey, todayKey } from "./date";
 import { calendarTaskOnDay, scheduledSpanOverlaps } from "../shared/taskDates";
 
@@ -71,5 +72,24 @@ export function selectTasksForExcel(
   return {
     tasks: applyFilters(views, options.filter),
     fileName: `妥了任务_概览_${todayKey(now)}_${clock}.xlsx`,
+  };
+}
+
+/** 备忘导出范围（2026-10-18）：与列表所见一致 = 搜索关键词 + 记于单日锚点（notesDay，
+ *  null = 全部日期）过滤后的可见备忘（任务导出同款「所见即所得」语义）；文件名与任务
+ *  导出同构（妥了备忘_{当天}_{HHmm}）。 */
+export function selectNotesForExcel(
+  notes: NoteItem[],
+  options: { filter: FilterState; notesDay?: string | null; now?: Date },
+): { notes: NoteItem[]; fileName: string } {
+  const now = options.now ?? new Date();
+  const visible = filterNotesByCreatedRange(
+    filterNotes(notes, options.filter.keyword),
+    options.notesDay ?? null,
+    options.notesDay ?? null,
+  );
+  return {
+    notes: visible,
+    fileName: `妥了备忘_${todayKey(now)}_${localTimeOfDay(now)}.xlsx`,
   };
 }

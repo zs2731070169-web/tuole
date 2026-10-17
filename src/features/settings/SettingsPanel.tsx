@@ -1,18 +1,18 @@
-// 设置页：主题 / 语言 / 状态机规则（顺延目标）/ 提醒（快捷键说明已随快捷键于 2026-10 整体下线）
+// 设置页：主题 / 语言 / 状态机规则（顺延目标）/ 提醒（2026-10-18 重构：每日首启摘要 + 消息中心）
 // 红线：不提供「逾期自动完成」开关（原「交互红线」提示文案已按需求从界面移除，仅保留代码注释约束）
-import { useEffect, useRef, useState } from "react";
-import { X, Sun, Moon, Monitor, Bell, ChevronDown, Archive, Download, RotateCcw, FolderOpen } from "lucide-react";
+import { useRef, useState } from "react";
+import { X, Sun, Moon, Monitor, ChevronDown, Archive, Download, RotateCcw, FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ThemeMode, RollOverTarget } from "../../shared/types";
 import { useSettingsStore } from "../../stores/useSettingsStore";
+import { useMessageStore } from "../../stores/useMessageStore";
 import { useUiStore } from "../../stores/useUiStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { t } from "../../lib/i18n";
 import { APP_NAME } from "../../shared/constants";
-import { requestNotificationPermission, normalizeReminderTime, checkReminders, } from "../../services/scheduler";
 import {
   listBackups,
   restoreFromBackup,
@@ -111,56 +111,20 @@ export function SettingsPanel() {
             </div>
           </Section>
 
-          {/* 提醒 */}
+          {/* 提醒（2026-10-18 重构）：固定时间提醒 → 每日首启摘要，右上角消息中心查看 */}
           <Section title={t("settings.reminder", lang)}>
-            <button
-              onClick={() => {
-                if (!settings.reminderEnabled) {
-                  // 桌面提醒由主进程读取落盘设置并独立调度；浏览器仍用页面内提示通道。
-                  patch({ reminderEnabled: true });
-                  if (!isDesktopApp) void requestNotificationPermission();
-                  if (!isDesktopApp) checkReminders();
-                } else {
-                  patch({ reminderEnabled: false });
-                }
+            <ToggleRow
+              label={t("settings.reminderToggle", lang)}
+              checked={settings.reminderEnabled}
+              onChange={(enabled) => {
+                patch({ reminderEnabled: enabled });
+                // 开启即生成当日摘要（幂等）：当场在右上角消息中心可见，无需独立测试入口
+                if (enabled) useMessageStore.getState().ensureDailyDigest();
               }}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
-                settings.reminderEnabled ? "bg-status-done/15 text-status-done" : "bg-muted text-muted-foreground hover:bg-muted/70",
-              )}
-            >
-              <Bell className="size-4" />
-              {settings.reminderEnabled
-                ? t("settings.reminderOn", lang).replace("{time}", settings.reminderTime)
-                : t("settings.reminderEnable", lang)}
-            </button>
-            {/* 提醒时间：手动输入（文本框，失焦/回车归一化提交）。勿改回原生 <input type="time">——
-                其时/分字段的蓝色选区高亮无法用 CSS 去除；也勿改成下拉——产品要求手动编辑 */}
-            {settings.reminderEnabled && (
-              <div className="mt-3 flex items-center justify-between text-[13px]">
-                <span>{t("settings.reminderTime", lang)}</span>
-                <ReminderTimeField value={settings.reminderTime} onCommit={(time) => patch({ reminderTime: time })} />
-              </div>
-            )}
-            {/* 浏览器端系统通知未授权时给说明 + 补授权入口：应用内弹窗与音效不受影响，
-                授权的价值仅是切到后台标签页时也能收到系统横幅 */}
-            {settings.reminderEnabled &&
-              !isDesktopApp &&
-              typeof Notification !== "undefined" &&
-              Notification.permission !== "granted" && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-                  <span className="min-w-0 flex-1">{t("settings.reminderPermissionHint", lang)}</span>
-                  <button
-                    type="button"
-                    onClick={() => void requestNotificationPermission()}
-                    className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 font-medium text-foreground transition-colors hover:bg-muted"
-                  >
-                    {t("settings.reminderGrant", lang)}
-                  </button>
-                </div>
-              )}
-            {/* 「测试提醒」按钮已移除（2026-10 用户决策）：提醒开启即立即检查一次，
-                当场就能验证投递，无需独立测试入口 */}
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+              {t("settings.reminderHint", lang)}
+            </p>
           </Section>
 
           {/* 备份与恢复：自动备份间隔只在开启时显示；导出/恢复与快照列表始终可用 */}
@@ -424,35 +388,5 @@ function BackupRow({
         {t("backup.restore", lang)}
       </button>
     </li>
-  );
-}
-
-// 手动编辑提醒时间：本地草稿 + 失焦/回车统一归一化提交；非法输入回退显示原值（不落库）
-function ReminderTimeField({ value, onCommit }: { value: string; onCommit: (time: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  // 外部值变化（重置/迁移）时同步进编辑态
-  useEffect(() => setDraft(value), [value]);
-  const commit = () => {
-    const normalized = normalizeReminderTime(draft);
-    if (normalized) {
-      setDraft(normalized);
-      if (normalized !== value) onCommit(normalized);
-    } else {
-      setDraft(value); // 非法输入：回退原值，不落库（scheduler 对存量非法值也会回退 9:00）
-    }
-  };
-  return (
-    <input
-      type="text"
-      value={draft}
-      placeholder="09:00"
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur(); // 回车借 blur 走同一归一化出口
-      }}
-      // outline-none：无任何聚焦高亮（原生 time 控件的蓝色选区问题曾在此出现）
-      className="h-8 w-20 rounded-lg border border-input bg-background px-2 text-right text-[13px] tabular-nums outline-none"
-    />
   );
 }

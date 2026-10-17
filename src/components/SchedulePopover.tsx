@@ -25,9 +25,12 @@ interface Props {
   hint?: string;
   /** 当前已选日期（日历中高亮）；默认不高亮 */
   selectedKey?: string;
+  /** 可选「清除」快捷项（如备忘选日的「全部日期」）：提供时在快捷行首位渲染并回调 null 语义 */
+  onClear?: () => void;
+  clearLabel?: string;
 }
 
-export function SchedulePopover({ lang, onPick, children, align = "start", hint, selectedKey }: Props) {
+export function SchedulePopover({ lang, onPick, children, align = "start", hint, selectedKey, onClear, clearLabel }: Props) {
   const [open, setOpen] = useState(false);
   const zh = lang === "zh-CN";
   const today = todayKey();
@@ -45,6 +48,21 @@ export function SchedulePopover({ lang, onPick, children, align = "start", hint,
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent align={align} className="w-auto p-0">
         <div className="flex flex-wrap gap-1 border-b px-2.5 py-2">
+          {onClear && (
+            <button
+              type="button"
+              onClick={() => {
+                onClear();
+                setOpen(false);
+              }}
+              className={cn(
+                "inline-flex h-8 items-center gap-1 rounded-lg border border-border bg-card px-2.5",
+                "text-[12px] font-medium text-foreground transition-colors hover:bg-muted active:scale-95",
+              )}
+            >
+              {clearLabel}
+            </button>
+          )}
           {presets.map((p) => (
             <button
               key={p.key}

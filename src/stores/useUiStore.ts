@@ -30,13 +30,22 @@ function decideInitialView(): ViewMode {
 
 const initialView = decideInitialView();
 
+// 备忘侧边栏目标（2026-10-18）：create 模式无持久化实体（点「保存」才创建，
+// 无任务的 draft 机制）；convert 模式同样全缓冲，只有选日并确认后才创建任务、移除备忘。
+export type NoteEditorState =
+  | { mode: "create" }
+  | { mode: "edit"; id: string }
+  | { mode: "convert"; id: string };
+
 interface UiState {
   view: ViewMode;
   returnView: ViewMode | null; // 跨视图跳转（日历点任务 chip → 工作台）后的可返回视图；任何手动切视图即清空
   workbenchDay: string; // 工作台「当日」栏锚点（YYYY-MM-DD），默认今天、不持久化；状态筛选栏按它统计当日任务
+  notesDay: string | null; // 备忘视图「记于日」锚点（YYYY-MM-DD），null = 全部日期、不持久化（2026-10-18 行首单日选择器）
   selectedIds: string[]; // 选中（高亮）任务：单击卡片进入，是单击高亮的目标集合
   checkedIds: string[]; // 打勾（批量勾选框）任务：批量操作条的目标。与选中分离——单击选中不自动打勾
   editingId: string | null; // 打开的任务详情/编辑面板
+  noteEditor: NoteEditorState | null; // 打开的备忘创建/编辑/转任务抽屉（全缓冲；与任务编辑抽屉不同时触发）
   expandedIds: string[]; // 展开「待办项面板」的任务（勾选在行内进行，不进编辑抽屉；2026-10 由「子任务」更名）
   settingsOpen: boolean;
   newTaskOpen: boolean;
@@ -46,12 +55,15 @@ interface UiState {
   openDayInWorkbench: (dayKey: string) => void; // 日历 chip 点击：锚定该日跳工作台查看，并记录可返回日历
   goBackToReturnView: () => void; // 工作台「返回日历」等回退入口，用完即清空返回态
   setWorkbenchDay: (day: string) => void;
+  setNotesDay: (day: string | null) => void;
   select: (id: string, additive?: boolean) => void;
   clearSelection: () => void;
   clearHighlight: () => void; // 点空白处只撤选中高亮，不动批量勾选集合（勾选是独立通道）
   toggleChecked: (id: string) => void; // 批量勾选框：打勾同时保持高亮；取消勾则同时取消高亮
   openEditor: (id: string) => void;
   closeEditor: () => void;
+  openNoteEditor: (state: NoteEditorState) => void;
+  closeNoteEditor: () => void;
   toggleExpanded: (id: string) => void;
   collapseAll: () => void;
   setSettingsOpen: (b: boolean) => void;
@@ -65,15 +77,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   view: initialView,
   returnView: null,
   workbenchDay: todayKey(),
+  notesDay: null,
   selectedIds: [],
   checkedIds: [],
   editingId: null,
+  noteEditor: null,
   expandedIds: [],
   settingsOpen: false,
   newTaskOpen: false,
   draggingStatus: null,
   draggingTaskId: null,
   setWorkbenchDay: (day) => set({ workbenchDay: day }),
+  setNotesDay: (day) => set({ notesDay: day }),
   // 手动切视图（TopBar）一律清空返回态——用户自己导航后「返回」按钮即失效
   setView: (v) => {
     set({ view: v, returnView: null });
@@ -151,6 +166,9 @@ export const useUiStore = create<UiState>((set, get) => ({
       set((s) => ({ selectedIds: s.selectedIds.filter((x) => x !== id) }));
     }
   },
+  // 备忘抽屉为纯 setter：含 convert 也只打开缓冲界面，不创建任务；无草稿回收、无选中态耦合
+  openNoteEditor: (state) => set({ noteEditor: state }),
+  closeNoteEditor: () => set({ noteEditor: null }),
   setSettingsOpen: (b) => set({ settingsOpen: b }),
   setNewTaskOpen: (b) => set({ newTaskOpen: b }),
   setDraggingStatus: (s) => set({ draggingStatus: s }),

@@ -6,6 +6,8 @@ export const STORAGE_KEYS = {
   settings: "todo.settings.v1",
   ui: "todo.ui.v1",
   backups: "todo.backups.v1",
+  notes: "todo.notes.v1",
+  messages: "todo.messages.v1",
 } as const;
 
 // 只读状态筛选器分段项（查看视角，不改变任何任务状态）

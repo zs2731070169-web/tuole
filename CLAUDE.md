@@ -40,16 +40,16 @@ AGENTS.md 是本项目行为约束与架构决策的**唯一权威来源**（上
 
 ```
 src/
-  shared/     纯逻辑与契约：types / statusMachine / filter / workbench / calendar / excelImport / overviewStats / constants（无 React 依赖，被 tests/ 直接覆盖）
-  stores/     zustand store：task（数据）/ ui / filter / calendar / settings / confirm
+  shared/     纯逻辑与契约：types / statusMachine / filter / workbench / calendar / excelImport / overviewStats / notes / messages / constants（无 React 依赖，被 tests/ 直接覆盖）
+  stores/     zustand store：task（数据）/ ui / filter / calendar / settings / confirm / note（备忘池）/ message（消息中心）
   lib/        无业务状态的工具：date / storage / excel / excelScope / i18n / theme / reveal-engine / desktopBridge（Electron 检测与窄 IPC 桥）
-  services/   scheduler.ts（跨午夜 + visibilitychange 状态结算与提醒）/ backup.ts（自动快照引擎）
-  features/   按域组织的视图组件：workbench / calendar / tasks(TaskEditor) / settings
-  components/ 跨视图复用组件（TaskItem、ViewToolbar、StatusFilterBar 等，行内筛选组内嵌于 ViewToolbar）；ui/ 为 shadcn 生成件，勿手改样式意图
+  services/   scheduler.ts（跨午夜 + visibilitychange 状态结算与当日摘要触发）/ backup.ts（自动快照引擎）
+  features/   按域组织的视图组件：workbench / calendar / tasks(TaskEditor) / settings / notes(NotesView+NotesEditor)
+  components/ 跨视图复用组件（TopBar 内 MessageCenter、TaskItem、ViewToolbar、StatusFilterBar、RowButton 等，行内筛选组内嵌于 ViewToolbar）；ui/ 为 shadcn 生成件，勿手改样式意图
   routes/     TanStack 文件路由；routeTree.gen.ts 由 router-plugin 自动生成，勿手改
-tests/        Vitest：statusMachine / filter / workbench / calendar / date / theme / storage / reminder / backup / excel / confirmStore / overviewStats
+tests/        Vitest：statusMachine / filter / workbench / calendar / date / theme / storage / messages / messageStore / scheduler / backup / excel / confirmStore / overviewStats / notes / noteStore
 ```
 
-启动链：`main.tsx`（desktop-cursors 桌面端光标标记 + initRevealEngine + cleanupLegacyKeys）→ `routes/index.tsx` 的 App effect（initSettings → initTasks → purgeEmptyDrafts → startScheduler + startAutoBackup；cleanup 对应 stop）。
+启动链：`main.tsx`（desktop-cursors 桌面端光标标记 + initRevealEngine + cleanupLegacyKeys）→ `routes/index.tsx` 的 App effect（initSettings → initTasks → initNotes → initMessages → purgeEmptyDrafts → startScheduler（内含当日摘要生成） + startAutoBackup；cleanup 对应 stop）。
 
 核心数据流（单向）：localStorage → `storage.ts` → `useTaskStore.tasks`（原始数据，**永不含 status**）→ `computeAutoStatus` 派生 `TaskView[]` → `applyFilters` 筛选 → 视图渲染；写路径上用户动作只改 `scheduledDate` / `completedAt` 等原始字段后 `persist()` 回写。

@@ -1,6 +1,7 @@
 // useUiStore 选中通道语义：单击切换/再点取消（2026-10 用户决策：选中态必须有退出路径，
 // 否则工作台蓝色高亮会一直卡住）、修饰键多选同步勾选集合、勾选与高亮两通道分离；
-// 初始视图决策：应用启动（新会话）默认落在「概览」，同会话刷新停留在当前视图
+// 初始视图决策：应用启动（新会话）默认落在「概览」，同会话刷新停留在当前视图；
+// noteEditor 备忘编辑抽屉态（2026-10-18）：create/edit/convert 三模式表达与纯 setter 语义
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveInitialView, useUiStore } from "../src/stores/useUiStore";
 
@@ -65,5 +66,33 @@ describe("select（选中高亮通道）", () => {
     useUiStore.getState().select("b", false);
     useUiStore.getState().clearHighlight();
     expect(useUiStore.getState()).toMatchObject({ selectedIds: [], checkedIds: ["a"] });
+  });
+});
+
+describe("noteEditor（备忘编辑抽屉态，2026-10-18）", () => {
+  beforeEach(() => {
+    useUiStore.setState({ noteEditor: null, editingId: null, selectedIds: [] });
+  });
+
+  it("open/close 往返：create、edit 与 convert 三模式均可表达，关闭回到 null", () => {
+    useUiStore.getState().openNoteEditor({ mode: "create" });
+    expect(useUiStore.getState().noteEditor).toEqual({ mode: "create" });
+
+    useUiStore.getState().openNoteEditor({ mode: "edit", id: "n1" });
+    expect(useUiStore.getState().noteEditor).toEqual({ mode: "edit", id: "n1" });
+
+    useUiStore.getState().openNoteEditor({ mode: "convert", id: "n1" });
+    expect(useUiStore.getState().noteEditor).toEqual({ mode: "convert", id: "n1" });
+
+    useUiStore.getState().closeNoteEditor();
+    expect(useUiStore.getState().noteEditor).toBeNull();
+  });
+
+  it("纯 setter：不动任务编辑链路（editingId / selectedIds 无副作用，备忘无草稿回收）", () => {
+    useUiStore.getState().openNoteEditor({ mode: "convert", id: "n1" });
+    expect(useUiStore.getState().editingId).toBeNull();
+    expect(useUiStore.getState().selectedIds).toEqual([]);
+    useUiStore.getState().closeNoteEditor();
+    expect(useUiStore.getState().editingId).toBeNull();
   });
 });
